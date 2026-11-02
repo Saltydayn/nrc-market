@@ -1,0 +1,15 @@
+name = "nrc-market"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "nrc-market"
+
+[vars]
+ALLOWED_REGIONS = "EU"
+ALLOWED_FACTIONS = "Horde"
+PER_KEY_PER_HOUR = "10"
+DAILY_UPLOAD_CAP = "2000"
+MONTHLY_WRITE_CAP = "300000"

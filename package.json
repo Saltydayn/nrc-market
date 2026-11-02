@@ -1,0 +1,1 @@
+{ "name": "nrc-market", "private": true, "type": "module", "scripts": { "test": "node --test worker/test/*.test.mjs" } }

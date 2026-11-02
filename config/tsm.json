@@ -1,0 +1,9 @@
+{
+  "base": "https://public-data.tradeskillmaster.com",
+  "files": [],
+  "probe": {
+    "gameTypes": ["forever", "wow-forever", "classic-forever"],
+    "regions": ["eu"],
+    "paths": ["region/items.csv", "commodities.csv", "realm/normal/items.csv", "realm/normal-horde/items.csv"]
+  }
+}
