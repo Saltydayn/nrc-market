@@ -1,19 +1,23 @@
 // nrc-market intake: takes auction scans from NRC Sync and files them in R2.
 // Format: hq specs/2026-11-02-market-data-format.md. No database: keys, counters and dedupe are small R2 objects.
 //
-//   POST /v1/scan    one scan (gzip JSON), header Authorization: Bearer <upload key>
-//   POST /v1/names   item names for one client language
-//   GET  /v1/health  quick check
+//   POST /v1/register  NRC Sync gets its own upload key on first start (no login; a few per IP per day)
+//   POST /v1/scans     up to 4 scans in one request (NRC Sync sends once an hour), Authorization: Bearer <key>
+//   POST /v1/names     item names for one client language
+//   GET  /v1/health    quick check
 //
 // R2 layout:
-//   keys/<sha256 of key>.json          { member, revoked }   (written by the login flow, later)
-//   raw/scans/<YYYY-MM-DD>/<id>.json.gz { received, member, app, scan }
+//   keys/<sha256 of key>.json            { member, created, revoked }
+//   raw/scans/<YYYY-MM-DD>/<HH>/<id>.json.gz { received, member, app, scan }
 //   raw/names/<locale>/<member>-<YYYY-MM-DD>.json.gz
-//   limits/<YYYY-MM-DD>.json           uploads today (all members)  -> daily cap
-//   limits/<YYYY-MM>.json              writes this month            -> monthly cap
-//   limits/key/<hash>/<YYYYMMDDHH>.json uploads by one key this hour -> per-key limit
+//   limits/<YYYY-MM-DD>.json             requests today (everyone)      -> daily cap
+//   limits/<YYYY-MM>.json                writes this month              -> monthly cap
+//   limits/key/<hash>/<YYYYMMDDHH>.json  requests by one key this hour  -> per-key limit
+//   limits/slot/<YYYYMMDDHH>.json        scans stored for that scan hour -> enough is enough
+//   limits/ip/<hash>/<YYYY-MM-DD>.json   keys handed out to one address today
 
-const SCAN_FORMAT = "nrc-market-scan/1";
+const SCANS_FORMAT = "nrc-market-scans/1";
+const MAX_SCANS = 4;
 const NAMES_FORMAT = "nrc-market-names/1";
 const MAX_BODY = 8 * 1024 * 1024;          // compressed
 const MAX_JSON = 24 * 1024 * 1024;         // after unpacking
@@ -29,8 +33,11 @@ function cfg(env) {
   return {
     regions: list(env.ALLOWED_REGIONS, "EU"),
     factions: list(env.ALLOWED_FACTIONS, "Horde"),
-    perKeyHour: Number(env.PER_KEY_PER_HOUR ?? 10),
-    dailyCap: Number(env.DAILY_UPLOAD_CAP ?? 2000),
+    guilds: list(env.ALLOWED_GUILDS, ""),                    // empty = any guild
+    perKeyHour: Number(env.PER_KEY_PER_HOUR ?? 3),
+    perSlot: Number(env.SCANS_PER_HOUR ?? 8),
+    keysPerIp: Number(env.KEYS_PER_IP_PER_DAY ?? 5),
+    dailyCap: Number(env.DAILY_UPLOAD_CAP ?? 4000),
     monthlyWrites: Number(env.MONTHLY_WRITE_CAP ?? 300000),   // R2 free tier: 1M writes/month
   };
 }
@@ -89,6 +96,7 @@ export function checkScan(s, c, now) {
   if (s.t > now + 600 || s.t < now - MAX_AGE) return "bad time";
   if (!c.regions.includes(s.region)) return "region";
   if (!c.factions.includes(s.faction)) return "faction";
+  if (c.guilds && c.guilds.length && !c.guilds.includes(s.guild)) return "guild";
   if (typeof s.data !== "string" || s.data.length === 0) return "no data";
   const lines = s.data.split("\n");
   if (lines.length !== s.items) return "item count";
@@ -127,27 +135,62 @@ async function count(env, who, now, writes) {
   await bump(env, `limits/${day(now).slice(0, 7)}.json`, writes);
 }
 
-async function postScan(request, env, now) {
+async function postScans(request, env, now) {
   const c = cfg(env);
   const who = await member(env, request);
   if (!who) return json(401, { error: "key" });
-  const limited = await overLimit(env, c, who, now, 4);
+  const limited = await overLimit(env, c, who, now, 3 + MAX_SCANS * 2);
   if (limited) return limited;
   const { body, error } = await readBody(request);
   if (error) return json(error, { error: "body" });
-  if (body.format !== SCAN_FORMAT) return json(400, { error: "format" });
-  const bad = checkScan(body.scan, c, now);
-  if (bad === "region" || bad === "faction") return json(403, { error: bad });
-  if (bad) return json(400, { error: bad });
+  if (body.format !== SCANS_FORMAT || !Array.isArray(body.scans)) return json(400, { error: "format" });
+  if (body.scans.length === 0 || body.scans.length > MAX_SCANS) return json(400, { error: "count" });
+  for (const scan of body.scans) {
+    const bad = checkScan(scan, c, now);
+    if (bad === "region" || bad === "faction" || bad === "guild") return json(403, { error: bad, id: scan?.id });
+    if (bad) return json(400, { error: bad, id: scan?.id });
+  }
 
-  const path = `raw/scans/${day(body.scan.t)}/${body.scan.id}.json.gz`;
-  if (await env.BUCKET.head(path)) return json(200, { ok: true, dup: true });
-  const record = { received: now, member: who.name, app: String(body.app || "").slice(0, 40), scan: body.scan };
-  await env.BUCKET.put(path, await gzip(JSON.stringify(record)), {
-    httpMetadata: { contentType: "application/json", contentEncoding: "gzip" },
-  });
-  await count(env, who, now, 4);
-  return json(200, { ok: true });
+  const results = [];
+  let writes = 3;
+  for (const scan of body.scans) {
+    const path = `raw/scans/${day(scan.t)}/${hour(scan.t).slice(8)}/${scan.id}.json.gz`;
+    if (await env.BUCKET.head(path)) { results.push({ id: scan.id, dup: true }); continue; }
+    const slotKey = `limits/slot/${hour(scan.t)}.json`;
+    const slot = (await getJson(env, slotKey))?.n || 0;
+    if (slot >= c.perSlot) { results.push({ id: scan.id, enough: true }); continue; }   // that hour is covered
+    const record = { received: now, member: who.name, app: String(body.app || "").slice(0, 40), scan };
+    await env.BUCKET.put(path, await gzip(JSON.stringify(record)), {
+      httpMetadata: { contentType: "application/json", contentEncoding: "gzip" },
+    });
+    await bump(env, slotKey);
+    writes += 2;
+    results.push({ id: scan.id, stored: true });
+  }
+  await count(env, who, now, writes);
+  return json(200, { ok: true, scans: results });
+}
+
+// No login: every NRC Sync install asks for its own key once. Not a real lock (anyone with the app could
+// do it), but each key can be limited or revoked, and junk data gets filtered out later anyway.
+async function postRegister(request, env, now) {
+  const c = cfg(env);
+  const { body, error } = await readBody(request);
+  if (error) return json(error, { error: "body" });
+  const name = String(body?.name || "").replace(/[^\p{L}\p{N} _-]/gu, "").trim().slice(0, 40);
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const ipKey = `limits/ip/${(await sha256(ip + day(now))).slice(0, 24)}/${day(now)}.json`;
+  if (((await getJson(env, ipKey))?.n || 0) >= c.keysPerIp) return json(429, { error: "too many keys" }, { "retry-after": "86400" });
+  const month = (await getJson(env, `limits/${day(now).slice(0, 7)}.json`))?.n || 0;
+  if (month + 3 >= c.monthlyWrites) return json(503, { error: "monthly cap" }, { "retry-after": "86400" });
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const key = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const hash = await sha256(key);
+  const member = name || `install-${hash.slice(0, 8)}`;
+  await env.BUCKET.put(`keys/${hash}.json`, JSON.stringify({ member, created: now, app: String(body?.app || "").slice(0, 40) }));
+  await bump(env, ipKey);
+  await bump(env, `limits/${day(now).slice(0, 7)}.json`, 2);
+  return json(200, { ok: true, key, member });
 }
 
 async function postNames(request, env, now) {
@@ -172,7 +215,8 @@ export default {
     const url = new URL(request.url);
     const now = Math.floor(Date.now() / 1000);
     try {
-      if (request.method === "POST" && url.pathname === "/v1/scan") return await postScan(request, env, now);
+      if (request.method === "POST" && url.pathname === "/v1/scans") return await postScans(request, env, now);
+      if (request.method === "POST" && url.pathname === "/v1/register") return await postRegister(request, env, now);
       if (request.method === "POST" && url.pathname === "/v1/names") return await postNames(request, env, now);
       if (request.method === "GET" && url.pathname === "/v1/health") {
         const today = (await getJson(env, `limits/${day(now)}.json`))?.n || 0;

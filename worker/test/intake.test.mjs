@@ -39,21 +39,22 @@ function req(path, body, { key = KEY, zip = true } = {}) {
   return new Request("https://x" + path, { method: "POST", headers, body: zip ? gzipSync(raw) : raw });
 }
 
-const post = (e, s, opt) => worker.fetch(req("/v1/scan", { format: "nrc-market-scan/1", app: "nrc-sync 2.0.0", scan: s }, opt), e);
+const postMany = (e, list, opt) => worker.fetch(req("/v1/scans", { format: "nrc-market-scans/1", app: "nrc-sync 2.0.0", scans: list }, opt), e);
+const post = (e, s, opt) => postMany(e, [s], opt);
 
 test("good scan is stored once, gzipped, with the member name", async () => {
   const e = env();
   const s = scan();
   let r = await post(e, s);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { ok: true });
+  assert.deepEqual(await r.json(), { ok: true, scans: [{ id: s.id, stored: true }] });
   const key = [...e.BUCKET.m.keys()].find((k) => k.startsWith("raw/scans/"));
-  assert.match(key, /^raw\/scans\/\d{4}-\d\d-\d\d\/a1b2c3d4e5f6-\d+\.json\.gz$/);
+  assert.match(key, /^raw\/scans\/\d{4}-\d\d-\d\d\/\d\d\/a1b2c3d4e5f6-\d+\.json\.gz$/);
   const rec = JSON.parse(gunzipSync(Buffer.from(e.BUCKET.m.get(key))).toString());
   assert.equal(rec.member, "Salty Dayn");
   assert.equal(rec.scan.data, s.data);
   r = await post(e, s);
-  assert.deepEqual(await r.json(), { ok: true, dup: true });
+  assert.deepEqual(await r.json(), { ok: true, scans: [{ id: s.id, dup: true }] });
 });
 
 test("plain (not gzipped) uploads work too", async () => {
@@ -82,13 +83,57 @@ test("broken scans are refused with 400", async () => {
 
 test("per-key hourly limit answers 429", async () => {
   const e = env();
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 3; i++) {
     const r = await post(e, scan({ id: `a1b2c3d4e5f6-${now() - 100 - i}` }));
     assert.equal(r.status, 200);
   }
   const r = await post(e, scan({ id: `a1b2c3d4e5f6-${now() - 500}` }));
   assert.equal(r.status, 429);
   assert.ok(r.headers.get("retry-after"));
+});
+
+test("a batch of up to 4 scans in one request, more is refused", async () => {
+  const e = env();
+  const four = [0, 1, 2, 3].map((i) => scan({ id: `a1b2c3d4e5f6-${now() - 3600 * i - 60}`, t: now() - 3600 * i - 60 }));
+  const r = await postMany(e, four);
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).scans.filter((x) => x.stored).length, 4);
+  assert.equal((await postMany(e, [...four, scan()])).status, 400);
+});
+
+test("only 8 scans are kept per hour of the day", async () => {
+  const e = env();
+  e.PER_KEY_PER_HOUR = "100";
+  const t = now() - 120;
+  let stored = 0, enough = 0;
+  for (let i = 0; i < 10; i++) {
+    const res = await (await post(e, scan({ id: `abcd${i}efgh-${t}`, t }))).json();
+    stored += res.scans[0].stored ? 1 : 0;
+    enough += res.scans[0].enough ? 1 : 0;
+  }
+  assert.equal(stored, 8);
+  assert.equal(enough, 2);
+});
+
+test("guild filter when set", async () => {
+  const e = env();
+  e.ALLOWED_GUILDS = "Naga Rave Cave";
+  assert.equal((await post(e, scan({ guild: "Other Guild" }))).status, 403);
+  assert.equal((await post(e, scan({ guild: "Naga Rave Cave" }))).status, 200);
+});
+
+test("register hands out a working key, a few per address per day", async () => {
+  const e = env();
+  const reg = (ip) => worker.fetch(new Request("https://x/v1/register", { method: "POST",
+    headers: { "cf-connecting-ip": ip }, body: JSON.stringify({ app: "nrc-sync 2.0.0", name: "Salty Dayn" }) }), e);
+  const r = await reg("1.2.3.4");
+  assert.equal(r.status, 200);
+  const { key, member } = await r.json();
+  assert.equal(member, "Salty Dayn");
+  assert.equal((await post(e, scan(), { key })).status, 200);
+  for (let i = 0; i < 4; i++) assert.equal((await reg("1.2.3.4")).status, 200);
+  assert.equal((await reg("1.2.3.4")).status, 429);
+  assert.equal((await reg("5.6.7.8")).status, 200);
 });
 
 test("daily cap answers 503", async () => {

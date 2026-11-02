@@ -12,7 +12,7 @@ T0 = 1_793_480_400 // H * H          # an hour start
 
 def upload(store, sid, t, lines, cov=1.0, member="Salty Dayn"):
     scan = {"id": sid, "t": t, "cov": cov, "data": "\n".join(lines), "items": len(lines)}
-    day = __import__("time").strftime("%Y-%m-%d", __import__("time").gmtime(t))
+    day = __import__("time").strftime("%Y-%m-%d/%H", __import__("time").gmtime(t))
     store.put(f"raw/scans/{day}/{sid}.json.gz", gzip.compress(json.dumps(
         {"received": t, "member": member, "scan": scan}).encode()))
 
@@ -33,7 +33,7 @@ def test_hour_merge_latest_and_dedupe(tmp_path):
     assert it["min"] in (80, 90) and it["seen"] == T0
     assert it["ladder"] == "80*1;85*29"                # the newest scan's ladder
     assert latest["scans24h"] == 2 and latest["contributors24h"] == 2
-    hist = st.get_json(f"out/history/{2589 % 256:02x}.json")
+    hist = st.get_json(f"out/history/{process.day_of(T0)}/{2589 % 64:02x}.json")
     assert str(T0) in hist["2589"]
     # second run: nothing new, no history rewrite
     r = process.run(st, now=T0 + 3 * H)
@@ -70,7 +70,7 @@ def test_late_upload_for_an_old_hour_is_merged(tmp_path):
     process.run(st, now=T0 + H)
     upload(st, "bbbb-1", T0 + 200, goods(1.0, ["9999,5,5,5,1,1"]))    # arrives a day later (archive)
     process.run(st, now=T0 + 25 * H)
-    hist = st.get_json(f"out/history/{9999 % 256:02x}.json")
+    hist = st.get_json(f"out/history/{process.day_of(T0)}/{9999 % 64:02x}.json")
     assert str(T0) in hist["9999"]
 
 
@@ -79,7 +79,7 @@ def test_old_uploads_are_deleted(tmp_path):
     upload(st, "aaaa-1", T0, goods())
     process.run(st, now=T0 + H)
     r = process.run(st, now=T0 + 31 * 86400)
-    assert r["deleted"] == 1 and st.list("raw/scans/") == []
+    assert r["deleted"] == 1 and st.list("raw/scans/") == [] and st.list("out/history/") == []
 
 
 def test_names_are_merged_german_and_english(tmp_path):

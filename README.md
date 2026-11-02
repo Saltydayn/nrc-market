@@ -12,9 +12,11 @@ Nothing here costs money at our size. The code itself stops before the free limi
 
 1. **Cloudflare → R2:** turn R2 on (it may ask for a payment method), then *Create bucket* named `nrc-market`.
 2. **Cloudflare → Billing → Billable Usage → Create budget alert:** $1. You get an email if anything ever costs money.
-3. **Cloudflare → R2 → Manage API tokens → Create API token:** permission *Object Read & Write*, only bucket `nrc-market`.
-   It shows an *Access Key ID* and a *Secret Access Key* once.
-4. **Cloudflare → My Profile → API Tokens → Create Token:** template *Edit Cloudflare Workers*, your account.
+3. **Cloudflare → R2 → Manage API tokens → Create Account API token:** permission *Object Read & Write*,
+   only bucket `nrc-market`, no expiry. It shows an *Access Key ID* and a *Secret Access Key* once.
+4. **Cloudflare → My Profile → API Tokens → Create Token:** template *Edit Cloudflare Workers*. Leave the
+   permission list as it is. *Account Resources:* Include → your account. *Zone Resources:* Include → All zones.
+   Expiry and IP filter: leave empty. Continue → Create → copy the token.
 5. **GitHub → this repo → Settings → Secrets and variables → Actions → New repository secret**, four times:
    - `CLOUDFLARE_ACCOUNT_ID` (Cloudflare dashboard, right side of the account home page)
    - `CLOUDFLARE_API_TOKEN` (from step 4)
@@ -24,10 +26,13 @@ Nothing here costs money at our size. The code itself stops before the free limi
 Never paste these values into a chat or a file.
 
 ## Cost guards
-- Intake: max 10 uploads per member per hour, 2,000 per day for everyone, 300,000 storage writes per month
-  (R2 free: 1,000,000).
+- NRC Sync sends **once an hour** (all new scans in one request, max 4), only when there's something new.
+- Intake: max 3 requests per install per hour, 4,000 per day for everyone, max 8 scans kept per hour of the day
+  (more add nothing), 5 new install keys per internet address per day, 300,000 storage writes per month (R2 free: 1,000,000).
+- In game, guildies announce finished scans, so the guild asks for a full scan only about every 20 minutes.
 - Hourly job: max 800 writes per run (~580,000 a month at worst; normal runs use far fewer).
 - Uploads are deleted after 30 days; the hourly history keeps 30 days, daily summaries stay.
+  Worst case (8 scans every hour, all day): ~2–3 GB of the 10 GB free storage.
 - GitHub Actions: ~720 of the 2,000 free minutes per month (shared with your other private repos). If that gets
   tight, change the schedule in `.github/workflows/hourly.yml` to every 2 hours.
 

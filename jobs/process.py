@@ -5,9 +5,11 @@ Per run (hourly):
 2. For every hour that got new scans, merge all scans of that hour into one snapshot per item:
    weighted median of each number, weight = how much of the AH the scan read x how late in the hour it was.
    With 3+ scans in an hour, a scan whose prices sit far away from the others is left out (flags.json).
-3. Write hourly history (256 files split by item ID, last 30 days), monthly daily rollups,
-   latest.json (current state + 6 h / 24 h change), names.json.
-4. Delete uploads older than 30 days (they live on in the history).
+3. Write hourly history (one folder per day, 64 files split by item ID, last 30 days), monthly daily
+   rollups, latest.json (current state + 6 h / 24 h change), names.json.
+   Per day folders keep every file small even with a million+ listings in the AH: a run only touches the
+   days that got new scans.
+4. Delete uploads and hourly history older than 30 days (the daily rollups stay).
 """
 import gzip
 import json
@@ -15,8 +17,9 @@ import time
 from collections import defaultdict
 
 HOUR = 3600
-KEEP_HOURLY = 30 * 24 * HOUR
+KEEP_DAYS = 30
 KEEP_RAW_DAYS = 30
+SHARDS = 64
 OUTLIER = (0.67, 1.5)          # a scan's typical price vs everyone else's
 FIELDS = ("min", "p10", "med", "units", "listings")
 
@@ -87,7 +90,15 @@ def merge_hour(scans, hour):
 
 
 def shard_of(key):
-    return f"{int(key.split(':')[0]) % 256:02x}"
+    return f"{int(key.split(':')[0]) % SHARDS:02x}"
+
+
+def day_of(h):
+    return time.strftime("%Y-%m-%d", time.gmtime(int(h)))
+
+
+def history_path(d, sh):
+    return f"out/history/{d}/{sh}.json"
 
 
 def load_scan(store, path):
@@ -114,7 +125,14 @@ def run(store, now=None):
         touched.add(h)
 
     flags = store.get_json("out/flags.json") or []
-    shards, ladders = {}, store.get_json("out/ladders.json") or {}
+    shards, ladders = {}, store.get_json("out/ladders.json") or {}     # (day, shard) -> {key: {hour: nums}}
+
+    def shard(d, sh):
+        if (d, sh) not in shards:
+            shards[(d, sh)] = store.get_json(history_path(d, sh)) or {}
+        return shards[(d, sh)]
+
+    changed = set()
     for h in sorted(touched):
         scans = [load_scan(store, done[sid][0]) for sid in hours[str(h)] if store.get(done[sid][0]) is not None]
         if not scans:
@@ -122,24 +140,20 @@ def run(store, now=None):
         snap, lad, excluded = merge_hour(scans, h)
         for sid in excluded:
             flags.append({"scan": sid, "member": done[sid][2], "hour": h})
+        d = day_of(h)
         for k, nums in snap.items():
             sh = shard_of(k)
-            if sh not in shards:
-                shards[sh] = store.get_json(f"out/history/{sh}.json") or {}
-            shards[sh].setdefault(k, {})[str(h)] = nums
+            shard(d, sh).setdefault(k, {})[str(h)] = nums
+            changed.add((d, sh))
         for k, l in lad.items():
             if k not in ladders or ladders[k][0] <= h:
                 ladders[k] = [h, l]
 
     if touched:
-        for sh, data in shards.items():
-            for k in list(data):
-                data[k] = {hh: v for hh, v in data[k].items() if int(hh) >= now - KEEP_HOURLY}
-                if not data[k]:
-                    del data[k]
-            store.put_json(f"out/history/{sh}.json", data)
-        write_daily(store, shards, touched)
-        write_latest(store, shards, ladders, done, now)
+        for d, sh in sorted(changed):
+            store.put_json(history_path(d, sh), shards[(d, sh)])
+        write_daily(store, {key: v for key, v in shards.items() if key in changed})
+        write_latest(store, shard, ladders, done, now)
         store.put_json("out/ladders.json", ladders)
         store.put_json("out/flags.json", flags[-500:])
 
@@ -149,20 +163,15 @@ def run(store, now=None):
     return {"new_hours": len(touched), "names": names_done, "deleted": cleaned, "writes": store.writes}
 
 
-def write_daily(store, shards, touched_hours):
+def write_daily(store, day_shards):
+    """day_shards: {(day, shard): {key: {hour: nums}}} -> out/daily/<YYYY-MM>.json {key: {day: [low, median, units]}}"""
     months = defaultdict(lambda: defaultdict(dict))
-    days = {time.strftime("%Y-%m-%d", time.gmtime(h)) for h in touched_hours}
-    for data in shards.values():
+    for (d, _), data in day_shards.items():
         for k, per_hour in data.items():
-            per_day = defaultdict(list)
-            for hh, v in per_hour.items():
-                d = time.strftime("%Y-%m-%d", time.gmtime(int(hh)))
-                if d in days:
-                    per_day[d].append(v)
-            for d, vals in per_day.items():
-                meds = sorted(v[2] for v in vals)
-                units = sorted(v[3] for v in vals)
-                months[d[:7]][k][d] = [min(v[0] for v in vals), meds[len(meds) // 2], units[len(units) // 2]]
+            vals = list(per_hour.values())
+            meds = sorted(v[2] for v in vals)
+            units = sorted(v[3] for v in vals)
+            months[d[:7]][k][d] = [min(v[0] for v in vals), meds[len(meds) // 2], units[len(units) // 2]]
     for m, items in months.items():
         cur = store.get_json(f"out/daily/{m}.json") or {}
         for k, per_day in items.items():
@@ -180,27 +189,25 @@ def _near(per_hour, target):
     return best[1] if best else None
 
 
-def write_latest(store, shards, ladders, done, now):
-    # shards loaded this run cover every item that changed; load the rest so latest.json stays complete
-    for i in range(256):
-        sh = f"{i:02x}"
-        if sh not in shards:
-            shards[sh] = store.get_json(f"out/history/{sh}.json") or {}
+def write_latest(store, shard, ladders, done, now):
+    """current state per item from the last 2 days of hourly history (items unseen for 2 days drop out)"""
+    per_item = defaultdict(dict)
+    for d in (day_of(now - 86400), day_of(now)):
+        for i in range(SHARDS):
+            for k, per_hour in shard(d, f"{i:02x}").items():
+                per_item[k].update(per_hour)
     items = {}
-    for data in shards.values():
-        for k, per_hour in data.items():
-            last_h = max(int(h) for h in per_hour)
-            if last_h < now - 7 * 24 * HOUR:
-                continue
-            v = per_hour[str(last_h)]
-            row = dict(zip(FIELDS, v))
-            row["seen"] = last_h
-            for label, back in (("ch6", 6), ("ch24", 24)):
-                old = _near(per_hour, last_h - back * HOUR)
-                row[label] = round((v[2] - old[2]) / old[2], 4) if old and old[2] else None
-            if k in ladders:
-                row["ladder"] = ladders[k][1]
-            items[k] = row
+    for k, per_hour in per_item.items():
+        last_h = max(int(h) for h in per_hour)
+        v = per_hour[str(last_h)]
+        row = dict(zip(FIELDS, v))
+        row["seen"] = last_h
+        for label, back in (("ch6", 6), ("ch24", 24)):
+            old = _near(per_hour, last_h - back * HOUR)
+            row[label] = round((v[2] - old[2]) / old[2], 4) if old and old[2] else None
+        if k in ladders:
+            row["ladder"] = ladders[k][1]
+        items[k] = row
     recent = [d for d in done.values() if d[1] >= now - 24 * HOUR]
     store.put_json("out/latest.json", {
         "updated": now,
@@ -236,8 +243,10 @@ def merge_names(store, seen):
 def cleanup(store, done, hours, now):
     cutoff = time.strftime("%Y-%m-%d", time.gmtime(now - KEEP_RAW_DAYS * 86400))
     old = [p for p in store.list("raw/scans/") if p.split("/")[2] < cutoff]
-    if old:
-        store.delete(old)
+    hist_cut = time.strftime("%Y-%m-%d", time.gmtime(now - KEEP_DAYS * 86400))
+    old_hist = [p for p in store.list("out/history/") if p.split("/")[2] < hist_cut]
+    if old or old_hist:
+        store.delete(old + old_hist)
     for sid in [s for s, d in done.items() if d[1] < now - (KEEP_RAW_DAYS + 5) * 86400]:
         del done[sid]
     for h in [h for h in hours if int(h) < now - (KEEP_RAW_DAYS + 5) * 86400]:
