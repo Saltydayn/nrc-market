@@ -83,3 +83,23 @@ export function loadingBlock(h = 240) {
 export function errorBlock(msg = "The market data didn't load.") {
   return html`<div class="state-msg"><p>${msg}</p><button class="btn" data-action="retry" type="button">Try again</button></div>`;
 }
+
+// Live site before the first processed scan.
+export function waitingBlock() {
+  return html`<div class="state-msg state-wait">
+    <h1>Waiting for the first scan</h1>
+    <p>Prices show up here once a guild member opens the auction house with GuildKit running.
+      NRC Sync uploads the scan within the hour, then it takes up to another hour to appear.</p>
+    <p class="state-actions"><button class="btn" data-action="retry" type="button">Check again</button>
+      <a class="state-link" href="?data=sample#/">Look around with sample data</a></p>
+  </div>`;
+}
+
+// Data exists, but the visitor isn't signed in (sign-in isn't built yet).
+export function lockedBlock() {
+  return html`<div class="state-msg state-wait">
+    <h1>Members only</h1>
+    <p>Guild prices are only for Naga Rave Cave members. Sign-in with Discord is coming soon.</p>
+    <p class="state-actions"><a class="state-link" href="?data=sample#/">Look around with sample data</a></p>
+  </div>`;
+}

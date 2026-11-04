@@ -6,31 +6,42 @@ import { setSampleClock, now } from "./clock.js";
 import { monthsBetween, daysBetween, dailySeries, rangeSeconds } from "./analysis.js";
 import { utcDate } from "./format.js";
 
-// Later this becomes our own data URL (behind the login cookie).
-export const DATA_BASE = "sample/out/";
+// Live: our own data route (the site Worker reads the private bucket). Sample data on localhost,
+// or anywhere with ?data=sample (?data=stress adds 15,000 extra items to test speed).
+const PARAM = (() => {
+  try { return new URLSearchParams(location.search).get("data"); } catch { return null; }
+})();
+const LOCAL = (() => {
+  try { return ["localhost", "127.0.0.1", ""].includes(location.hostname); } catch { return true; }
+})();
+export const IS_STRESS = PARAM === "stress";
+export const IS_SAMPLE = IS_STRESS || PARAM === "sample" || (LOCAL && PARAM !== "live");
+export const DATA_BASE = IS_SAMPLE ? "sample/out/" : "/data/";
 const STRESS_LATEST = "sample/stress/latest.json";
 // Oldest month a daily file can exist for; months before it are never requested.
-export const FIRST_MONTH = "2026-10";
-
-export const IS_SAMPLE = DATA_BASE.startsWith("sample/");
-export const IS_STRESS = (() => {
-  try { return new URLSearchParams(location.search).get("data") === "stress"; } catch { return false; }
-})();
+export const FIRST_MONTH = IS_SAMPLE ? "2026-10" : "2026-11";
 
 const cache = new Map();
 
-class NotFound extends Error {}
+export class NotFound extends Error {}
+// No scan has been processed yet (no latest.json, or an empty one).
+export class NoData extends Error {}
+// The data is there, but only for signed-in members.
+export class Locked extends Error {}
 
 function getJSON(url, { optional = false } = {}) {
   if (!cache.has(url)) {
     const p = fetch(url, { credentials: "include" }).then((res) => {
       if (res.status === 404) throw new NotFound(url);
+      if (res.status === 401 || res.status === 403) throw new Locked(url);
       if (!res.ok) throw new Error(`${res.status} ${url}`);
       return res.json();
     });
     cache.set(url, p);
     // Failed loads are forgotten so "Try again" really tries again. A 404 is a real answer, keep it.
     p.catch((e) => { if (!(e instanceof NotFound)) cache.delete(url); });
+    // 404 on latest.json just means "no scan yet": try again on the next visit to that page.
+    if (url.endsWith("latest.json")) p.catch((e) => { if (e instanceof NotFound) cache.delete(url); });
   }
   const p = cache.get(url);
   return optional ? p.catch((e) => { if (e instanceof NotFound) return null; throw e; }) : p;
@@ -42,8 +53,12 @@ let market = null;
 export function loadMarket() {
   if (!market) {
     const latestUrl = IS_STRESS ? STRESS_LATEST : DATA_BASE + "latest.json";
-    market = Promise.all([getJSON(latestUrl), getJSON(DATA_BASE + "names.json", { optional: true })])
+    market = Promise.all([
+      getJSON(latestUrl).catch((e) => { throw e instanceof NotFound ? new NoData() : e; }),
+      getJSON(DATA_BASE + "names.json", { optional: true }),
+    ])
       .then(([latest, names]) => {
+        if (!latest || !latest.lastScanHour || !latest.items || !Object.keys(latest.items).length) throw new NoData();
         if (IS_SAMPLE) setSampleClock(latest.updated);
         const rows = buildRows(latest, names || {});
         return {

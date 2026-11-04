@@ -1,11 +1,11 @@
 // Boot, shell and hash router.
-import { loadMarket, IS_SAMPLE, IS_STRESS } from "./data.js";
+import { loadMarket, IS_SAMPLE, IS_STRESS, NoData, Locked } from "./data.js";
 import { html, setHTML, $ } from "./dom.js";
 import { TREE } from "./categories.js";
 import { now } from "./clock.js";
 import { fmtClock, fmtInt, fmtAge } from "./format.js";
 import { icon } from "./ui/icons.js";
-import { errorBlock, loadingBlock } from "./ui/bits.js";
+import { errorBlock, loadingBlock, waitingBlock, lockedBlock } from "./ui/bits.js";
 import { bindSearch } from "./ui/searchbox.js";
 import { watchlist, onWatchChange } from "./store.js";
 
@@ -88,7 +88,7 @@ function renderSide() {
         ${icon(open ? "chevronDown" : "chevron", { size: 14, cls: "tree-chev" })}<span>${t.label}</span><span class="count">${market ? fmtInt(c.get(t.slug) || 0) : ""}</span></a>
       ${subs.length ? html`<ul>${subs.map((s) => {
         const p = `${t.slug}/${s.slug}`;
-        return html`<li><a class="tree-sub${p === activeSub ? " active" : ""}" href="#/c/${p}" ${p === activeSub ? html`aria-current="page"` : ""}><span>${s.label}</span><span class="count">${fmtInt(c.get(p) || 0)}</span></a></li>`;
+        return html`<li><a class="tree-sub${p === activeSub ? " active" : ""}" href="#/c/${p}" ${p === activeSub ? html`aria-current="page"` : ""}><span>${s.label}</span><span class="count">${market ? fmtInt(c.get(p) || 0) : ""}</span></a></li>`;
       })}</ul>` : ""}
     </li>`;
   });
@@ -106,6 +106,12 @@ function markNav() {
     a.classList.toggle("active", on);
     if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
+}
+
+function setFresh(text) {
+  const el = $(".fresh");
+  el.className = "fresh";
+  setHTML(el, html`<span>${text}</span>`);
 }
 
 function freshness() {
@@ -140,8 +146,16 @@ async function route() {
     try {
       market = await loadMarket();
     } catch (e) {
-      console.warn(e);
-      setHTML(main, errorBlock());
+      if (e instanceof NoData) {
+        setHTML(main, waitingBlock());
+        setFresh("Waiting for the first scan");
+      } else if (e instanceof Locked) {
+        setHTML(main, lockedBlock());
+        setFresh("Members only");
+      } else {
+        console.warn(e);
+        setHTML(main, errorBlock());
+      }
       return;
     }
     renderSide();

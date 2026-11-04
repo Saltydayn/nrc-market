@@ -52,15 +52,18 @@ Movers · Deals · Insights · Watchlist (localStorage) · Search (`#/search?q=`
 - Class/subclass numbers for Forever are still a guess (as the brief says).
 - Time-of-day pattern needs ~7 days of hourly data to mean much; the page says so.
 
-## Before launch (found 4 Nov, not fixed)
-- `DATA_BASE` in `js/data.js` still points at `sample/out/`. Switch it to the real data URL.
-- The R2 bucket is private, so the browser can't read `out/` yet. Options: public access for `out/` only (r2.dev or a
-  custom domain, plus CORS; anyone with the link sees guild prices) or wait for the login layer in `site/functions/`.
-- Empty states: a missing `latest.json` shows "The market data didn't load" on every page, and an empty one with
-  `lastScanHour: null` shows "Last scan 20,762 days ago". Both need a calm "Waiting for the first scan" state.
-- TSM: `jobs/tsm.py` copies TSM files to the bucket, but nothing merges them into what the site reads. At launch,
-  prices come only from our addon scans.
-- Hosting: Cloudflare Pages can serve `site/` as is (no build step).
+## Launch state (marketsite, 4 Nov evening)
+- **Hosting:** Cloudflare Worker `nrc-market-site` with static assets (not Pages: the existing API token can deploy
+  Workers but not Pages). `.github/workflows/deploy-site.yml` deploys on every push to `main` that touches `site/`.
+  Only `index.html`, `css/`, `js/`, `fonts/`, `sample/` go online.
+- **Data:** `site/server/worker.js` serves `/data/<file>` from the private bucket (`out/` only, fixed file list), same
+  origin, no CORS, no public bucket. `DATA_ACCESS` in `server/wrangler.toml`: `members` (default) answers 401 for
+  existing files until Discord sign-in exists; `public` would open it to anyone with the link.
+- **data.js:** live site reads `/data/`. Sample data on localhost or with `?data=sample` (also on the live site);
+  `?data=live` forces live data on localhost. `FIRST_MONTH` = 2026-11 for live.
+- **Empty states:** no `latest.json` (or no items) → "Waiting for the first scan"; 401 → "Members only".
+- **Next:** Discord sign-in in the Worker (`signedIn()`), then members see live prices.
+- **TSM:** still only copied by the hourly job, not shown. Revisit when TSM has Forever files (`out/tsm_status.json`).
 
 ## Ideas not done
 Estimated sales and cancellations (needs listing-level diffs), crafting margins (needs recipe data), TSM region values

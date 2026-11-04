@@ -1,0 +1,16 @@
+# The market website: site files as static assets + this Worker for /data/.
+# Deployed by .github/workflows/deploy-site.yml, which copies the site into ./public first.
+name = "nrc-market-site"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[assets]
+directory = "./public"
+
+[[r2_buckets]]
+binding = "MARKET"
+bucket_name = "nrc-market"
+
+[vars]
+DATA_ACCESS = "members"   # "public" = anyone with the link sees prices. Members only until sign-in exists.
