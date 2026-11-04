@@ -1,0 +1,24 @@
+name: Smoke test intake
+# Checks the live intake end to end without storing a price: health, a fresh install key,
+# then an upload from the wrong faction, which must be refused with 403 (key accepted, data checked).
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      URL: https://nrc-market.saltydaynofficial.workers.dev
+    steps:
+      - name: Health
+        run: curl -fsS "$URL/v1/health"
+      - name: Register, then a wrong-faction upload
+        run: |
+          KEY=$(curl -fsS -X POST "$URL/v1/register" -d '{"app":"smoke-test","name":"smoke-test"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["key"])')
+          echo "::add-mask::$KEY"
+          T=$(date +%s)
+          BODY=$(printf '{"format":"nrc-market-scans/1","app":"smoke-test","scans":[{"id":"smoke0000-%s","t":%s,"region":"EU","realm":"Normal","faction":"Alliance","n":100,"read":100,"cov":1,"dur":1,"items":1,"data":"2589,1,1,1,1,1"}]}' "$T" "$T")
+          CODE=$(curl -s -o out.txt -w '%{http_code}' -X POST "$URL/v1/scans" -H "Authorization: Bearer $KEY" -H 'content-type: application/json' -d "$BODY")
+          cat out.txt; echo
+          test "$CODE" = "403" || { echo "expected 403, got $CODE"; exit 1; }
+          echo "Intake works: key accepted, wrong faction refused."
