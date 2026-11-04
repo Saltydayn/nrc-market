@@ -10,7 +10,8 @@ guild. This file is everything you need. Read it fully before writing code.
   background. A small desktop app uploads those scans every hour. An hourly job merges them into ready-made
   JSON files. **This website only displays those files. It never calculates heavy things and never asks a server.**
 - **Who uses it:** ~20–100 guild members, desktop and phone. Members only. Login comes later, not your job.
-- **All text members see is German.** Code, comments and docs are English. Comments should read like a person wrote
+- **All text members see is German, except item names: those are English** (decided by the owner; German item names
+  are not used). Code, comments and docs are English. Comments should read like a person wrote
   them: short, only where something isn't obvious.
 - **The owner** doesn't read code. He judges the product by looking at it. It has to look designed, calm and
   polished, not like a template or a generic AI site (section 8).
@@ -104,8 +105,9 @@ it in memory. Every file is a request we pay for in free-tier quota, so:
 ```
 - `q` quality 0–5 · `cls`/`sub` item class/subclass (section 5) · `ilvl` item level · `req` required level ·
   `stack` max stack.
-- `de` can be missing (use `en`). Both can be missing, or the whole entry (items in `19019`/`21877` in the sample):
-  show "Unbekannter Gegenstand #19019" with a neutral icon. Such items still appear in search by ID and on movers.
+- **Show only `en` as the item name.** Ignore `de` (the sample still has it; the live file may too). No `en`, or no
+  entry at all (items `19019`/`21877` in the sample): show "Unbekannter Gegenstand #19019" with a neutral icon.
+  Such items still appear in search by ID and on movers.
 - `icon` is optional (only the sample has it today). No icon → neutral placeholder.
 
 ### `history/<YYYY-MM-DD>/<shard>.json`: hourly history, one folder per UTC day
@@ -188,8 +190,9 @@ windowing. On phone, rows become two-line list items (name + price on top, chang
 scrolling table.
 
 ### 6.4 Suche
-- Instant dropdown while typing: German name, English name, or item ID. Accent/umlaut-tolerant ("trank" finds
-  "Tränke", "fl" finds "Fläschchen", "koenigsblut" finds "Königsblut"). Ranking: starts-with before contains, then by listings.
+- Instant dropdown while typing: English item name or item ID. Case- and punctuation-tolerant ("khadgars" finds
+  "Khadgar's Whisker", "flask titans" finds "Flask of the Titans": all words must match, any order).
+  Ranking: starts-with before contains, then by listings.
   Up to ~8 results with icon, name, price. Keyboard: arrows, Enter, Esc.
 - Enter without picking → full results page `#/suche?q=…` (same row design as the category table).
 - Build the index once after loading. It must stay instant with the stress file.
@@ -266,11 +269,11 @@ one consistent set, drawn or from an MIT/ISC set copied in) only where they help
 ## 9. Testing (do it, don't skip)
 - `node --test site/test/` covers the pure parts: money format (1 c, 99 c, 1 s, 1 g 0 s 1 c, 1.234 g, 999.999 g),
   percent format, relative times, category mapping, ladder parsing, suffix grouping, shard name, movers filter,
-  search normalisation (umlauts).
+  search normalisation (case, apostrophes, multi-word).
 - **Look at your work:** serve the site and take Playwright screenshots of every page at **1440×900** and on an
   **iPhone 13** profile, normal and with `?data=stress`. Open the screenshots and check them like a picky designer:
-  alignment, spacing, contrast, overflow, truncated names (long German names exist: "Formel: Armschiene - Überragende
-  Ausdauer"). Fix and repeat until they're right. Save the final set (1× scale, PNG) in `site/screenshots/`.
+  alignment, spacing, contrast, overflow, truncated names (long names exist: "Formula: Enchant Bracer - Superior
+  Stamina"). Fix and repeat until they're right. Save the final set (1× scale, PNG) in `site/screenshots/`.
 - Check the browser console: no errors, no 404s other than expected missing history files.
 - Keyboard-only pass: search, sort, open item, switch ranges, toggle favourite.
 
