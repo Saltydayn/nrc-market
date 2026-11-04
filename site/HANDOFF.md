@@ -6,7 +6,6 @@ Stress test: `http://localhost:8000/?data=stress#/`. Tests: `node --test site/te
 
 ## Owner decisions that override BRIEF.md (Q&A, 4 Nov)
 - **All UI text is English** (game terms: Market price, Supply, Trade Goods). German can come later.
-  Root `CLAUDE.md` still says member-facing text is German. Someone should update it.
 - **Categories follow the in-game AH tree** (Weapons, Armor, … Trade Goods → Cloth/Herbs/…) in a left sidebar.
 - **Extra pages:** Deals (buy out and relist) and Insights (rule-based signals with confidence and warnings).
 - **Change ranges:** 6h, 24h, 3d, 5d, 7d, 10d, 14d, 30d, 60d, 90d, 180d, 360d, All. Lists, movers and the chart all use them.
