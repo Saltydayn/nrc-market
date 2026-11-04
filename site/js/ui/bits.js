@@ -58,8 +58,8 @@ export function sparkline(values, { w = 88, h = 26, cls = "", dir = null } = {})
     pen = true;
   });
   const first = nums[0], last = nums[nums.length - 1];
-  const d = dir != null ? changeDir(dir) : changeDir(last / first - 1);
-  const k = d > 0 ? "up" : d < 0 ? "down" : "flat";
+  const trend = dir != null ? changeDir(dir) : changeDir(last / first - 1);
+  const k = trend > 0 ? "up" : trend < 0 ? "down" : "flat";
   return raw(`<svg class="spark spark-${k} ${cls}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}"/></svg>`);
 }
 

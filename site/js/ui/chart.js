@@ -32,7 +32,7 @@ function timeTicks(x0, x1, maxTicks) {
       return out;
     }
   }
-  for (const k of [1, 2, 7, 14]) {
+  for (const k of [1, 2, 3, 7, 14]) {
     if (span / (k * DAY) <= maxTicks) {
       const out = [];
       for (let t = berlinMidnight(x0) + DAY; t <= x1 + 3600; t = berlinMidnight(t + DAY + 7200)) {

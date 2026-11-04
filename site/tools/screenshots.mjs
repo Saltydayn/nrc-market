@@ -61,6 +61,8 @@ for (const [pname, prof] of profiles) {
         if (r.status() >= 400 && !/\/history\/|\/daily\//.test(u)) problems.push(`${file}: ${r.status()} ${u}`);
       });
       await page.goto(BASE + qs + hash, { waitUntil: "networkidle" });
+      // the phone tab bar is fixed to the viewport; in a full-page shot put it at the end instead
+      await page.addStyleTag({ content: ".tabs{position:static!important}.foot{padding-bottom:16px!important}" });
       if (opt.type) { await page.fill("#q", opt.type); await page.waitForTimeout(150); }
       await page.waitForTimeout(350);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

@@ -30,8 +30,8 @@ export async function render(root, { market, parts, query }) {
   const path = "/item/" + key;
   let range = pickRange(query, "item", "7d", CHART_RANGES);
 
-  const steps = parseLadder(cur.ladder);
-  if (!steps.length && cur.listings === 1) steps.push({ price: cur.min, units: cur.units });
+  // For suffix gear without a picked variant, all variants' listings together
+  const steps = row.variants && !focus ? mergedSteps(row.variants) : stepsOf(cur);
   const notNewest = cur.seen < market.lastScanHour;
   const watched = () => isWatched(row.id);
 
@@ -244,6 +244,18 @@ function fallbackCopy(text) {
     ta.remove();
     return ok;
   } catch { return false; }
+}
+
+function stepsOf(e) {
+  const steps = parseLadder(e.ladder);
+  if (!steps.length && e.listings === 1) steps.push({ price: e.min, units: e.units });
+  return steps;
+}
+
+function mergedSteps(variants) {
+  const by = new Map();
+  for (const v of variants) for (const st of stepsOf(v)) by.set(st.price, (by.get(st.price) || 0) + st.units);
+  return [...by].map(([price, units]) => ({ price, units })).sort((x, y) => x.price - y.price).slice(0, 10);
 }
 
 function ladder(steps, cur) {

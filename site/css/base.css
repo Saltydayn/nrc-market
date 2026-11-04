@@ -47,6 +47,7 @@ main:focus, h1:focus { outline: none; }
 }
 .skip:focus { top: var(--sp2); }
 
+[hidden] { display: none !important; }
 .muted { color: var(--text-3); }
 .num { text-align: right; }
 

@@ -197,7 +197,7 @@ main > .panel + .panel, main > .item-cols, main > .item-cols + .panel { margin-t
 .sig-rows .sig-text { font-size: var(--fs-s); }
 .sig-rows .sig-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--sp3); font-size: var(--fs-xs); }
 .sig-rows .sig-meta .chg { font-size: var(--fs-xs); }
-.sig-rows .sig-meta .chg + .muted { margin-left: -8px; }
+.per-week { white-space: nowrap; }
 .ins-foot { margin-top: var(--sp5); }
 
 /* ---------- watchlist ---------- */
@@ -230,6 +230,8 @@ main > .panel + .panel, main > .item-cols, main > .item-cols + .panel { margin-t
   .mini-spark { display: none; }
 
   .list-ctl { gap: var(--sp3); }
+  .mv-chips, .sub-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: calc(-1 * var(--sp4)); padding-right: var(--sp4); }
+  .mv-chips .chip, .sub-chips .chip { flex: none; }
   .list-ctl .field[type="search"] { flex: 1 1 100%; }
   .range-ctl { width: 100%; }
   .range-ctl .seg-label { display: none; }
@@ -252,6 +254,7 @@ main > .panel + .panel, main > .item-cols, main > .item-cols + .panel { margin-t
   .tod { gap: 1px; }
   .tod-x { font-size: 9.5px; }
   .deal-tbl { border-top: 0; }
+  .deal-tbl td.c-item { width: auto; }
   .var-tbl tr { grid-template-areas: "item p10" "units chg" !important; grid-template-columns: minmax(0, 1fr) auto !important; }
   .var-tbl td.c-units { padding-left: 0; }
 }

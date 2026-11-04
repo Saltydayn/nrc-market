@@ -420,7 +420,10 @@ select.field { min-width: 0; padding-right: var(--sp2); }
   }
   .tabs a.active { color: var(--accent-2); }
 
-  .seg button { min-height: 40px; padding: 0 12px; }
+  /* ranges wrap into a tidy grid instead of scrolling out of sight */
+  .seg { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; overflow: hidden; }
+  .seg button { min-height: 40px; padding: 0 4px; border-right: 0; box-shadow: inset -1px -1px 0 var(--line); }
+  .panel-h { flex-wrap: wrap; row-gap: 2px; }
   .chip { min-height: 40px; }
   .btn { min-height: 40px; }
   .icon-btn { width: 40px; height: 40px; }
@@ -442,11 +445,11 @@ select.field { min-width: 0; padding-right: var(--sp2); }
   .tbl tbody tr:hover td { background: none; }
   .tbl td.c-item { display: block; grid-area: item; width: auto; max-width: none; min-width: 0; }
   .tbl td.c-p10 { display: block; grid-area: p10; align-self: center; }
-  .tbl td.c-units { display: block; grid-area: units; padding-left: 44px; font-size: var(--fs-s); }
+  .tbl td.c-units { display: block; grid-area: units; padding-left: 44px; font-size: var(--fs-s); text-align: left; }
   .tbl td.c-units .units::after { content: " listed"; color: var(--text-3); }
   .tbl td.c-chg { display: block; grid-area: chg; font-size: var(--fs-s); }
   .tbl td.c-act { display: flex; grid-area: act; align-items: center; }
-  .tbl td.c-deal { display: block; grid-area: units; padding-left: 44px; font-size: var(--fs-s); }
+  .tbl td.c-deal { display: block; grid-area: units; padding-left: 44px; font-size: var(--fs-s); text-align: left; }
   .tbl td.c-profit { display: block; grid-area: chg; font-size: var(--fs-s); }
   .item-link { min-height: 36px; }
 }

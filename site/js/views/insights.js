@@ -46,7 +46,7 @@ export async function render(root, { market }) {
         <span class="sig-body">
           <span class="sig-top">${itemName(s.row)}<span class="val">${money(s.row.p10)}</span></span>
           <span class="sig-text">${s.detail}${s.trend ? html` If it holds: about ${moneyText(s.trend.proj30)} in 30 days.` : ""}</span>
-          <span class="sig-meta">${s.row.cat ? html`<span class="muted">${catLabel(s.row.cat)}</span>` : ""}${confidence(s.conf)}${s.trend ? change(s.trend.perWeek) : ""}${s.trend ? html`<span class="muted">/ week</span>` : ""}${warnings(s.warnings, { compact: true })}</span>
+          <span class="sig-meta">${s.row.cat ? html`<span class="muted">${catLabel(s.row.cat)}</span>` : ""}${confidence(s.conf)}${s.trend ? html`<span class="per-week">${change(s.trend.perWeek)} <span class="muted">/ week</span></span>` : ""}${warnings(s.warnings, { compact: true })}</span>
         </span></a></li>`)}</ul>`
         : html`<p class="panel-empty">Nothing right now.</p>`}
     </section>`;
