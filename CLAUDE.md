@@ -13,6 +13,7 @@ Data format: `hq/specs/2026-11-02-market-data-format.md` (change it only with sy
 | `worker/` | Intake: `POST /v1/register`, `/v1/scans`, `/v1/names`, `GET /v1/health`. Checks key, shape, limits; files uploads in R2. | Cloudflare Worker `nrc-market` |
 | `jobs/` | Hourly: copy TSM files (`tsm.py`), merge scans into history + `out/latest.json` (`process.py`). | GitHub Actions (`hourly.yml`) |
 | `config/tsm.json` | Which TSM files to copy / probe. | |
+| `site/` | Market website (owner chat: NRC · Market Site, inbox `marketsite`). Brief: `site/BRIEF.md`. | Cloudflare Pages (later) |
 
 ## Rules
 - Free tier only. R2 writes are capped in code (Worker: `MONTHLY_WRITE_CAP`; job: `MAX_WRITES_PER_RUN`). Keep it that way.
