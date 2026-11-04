@@ -52,6 +52,16 @@ Movers · Deals · Insights · Watchlist (localStorage) · Search (`#/search?q=`
 - Class/subclass numbers for Forever are still a guess (as the brief says).
 - Time-of-day pattern needs ~7 days of hourly data to mean much; the page says so.
 
+## Before launch (found 4 Nov, not fixed)
+- `DATA_BASE` in `js/data.js` still points at `sample/out/`. Switch it to the real data URL.
+- The R2 bucket is private, so the browser can't read `out/` yet. Options: public access for `out/` only (r2.dev or a
+  custom domain, plus CORS; anyone with the link sees guild prices) or wait for the login layer in `site/functions/`.
+- Empty states: a missing `latest.json` shows "The market data didn't load" on every page, and an empty one with
+  `lastScanHour: null` shows "Last scan 20,762 days ago". Both need a calm "Waiting for the first scan" state.
+- TSM: `jobs/tsm.py` copies TSM files to the bucket, but nothing merges them into what the site reads. At launch,
+  prices come only from our addon scans.
+- Hosting: Cloudflare Pages can serve `site/` as is (no build step).
+
 ## Ideas not done
 Estimated sales and cancellations (needs listing-level diffs), crafting margins (needs recipe data), TSM region values
 next to ours, day-of-week pattern, German translation, a hidden-columns setting for the category table on mid-size screens.
