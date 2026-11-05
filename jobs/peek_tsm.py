@@ -1,46 +1,23 @@
-"""One-off, read only: compare TSM's Forever file with our own latest scan."""
-import csv, io, json, statistics, sys, urllib.request
+"""One-off, read only: what arrived in each upload."""
+import gzip, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from store import R2Store
 s = R2Store("nrc-market", 0)
-latest = s.get_json("out/latest.json") or {}
 names = s.get_json("out/names.json") or {}
-print("tsm_status:", json.dumps(s.get_json("out/tsm_status.json"))[:1500])
-items = latest.get("items", {})
-print("ours: items", len(items), "updated", latest.get("updated"), "scans24h", latest.get("scans24h"), "contributors", latest.get("contributors24h"))
-print("names:", len(names), "with icon:", sum(1 for v in names.values() if "icon" in v), "sample:", list(names.items())[:2])
-url = "https://public-data.tradeskillmaster.com/forever/eu/realm/normal-horde/items.csv"
-req = urllib.request.Request(url, headers={"User-Agent": "nrc-market/1 (guild price archive)"})
-with urllib.request.urlopen(req, timeout=60) as r:
-    print("tsm headers:", {k: v for k, v in r.headers.items() if k.lower() in ("last-modified", "content-length", "date", "etag")})
-    text = r.read().decode("utf-8", "replace")
-rows = list(csv.reader(io.StringIO(text)))
-print("tsm header:", rows[0]); print("tsm rows:", len(rows) - 1)
-for row in rows[1:6]: print("  ", row)
-hdr = rows[0]
-def col(*cands):
-    for c in cands:
-        if c in hdr: return hdr.index(c)
-    return None
-iid, imv, imin, inum, iqty = col("itemString", "itemId", "id"), col("marketValue"), col("minBuyout"), col("numAuctions"), col("quantity")
-tsm = {}
-for row in rows[1:]:
-    key = row[iid].replace("i:", "")
-    tsm[key] = row
-both = [k for k in items if k.split(":")[0] in tsm and ":" not in k]
-print("overlap with our items:", len(both), "of ours", len(items), "| TSM-only:", len(set(tsm) - {k.split(':')[0] for k in items}))
-ratios = []
-for k in both:
-    t = tsm[k]; o = items[k]
-    if imv is not None and t[imv] and o.get("med"):
-        ratios.append(int(t[imv]) / o["med"])
-if ratios:
-    print("TSM marketValue / our median: median %.2f, p25 %.2f, p75 %.2f, within ±20%%: %d of %d" % (
-        statistics.median(ratios), statistics.quantiles(ratios, n=4)[0], statistics.quantiles(ratios, n=4)[2],
-        sum(1 for r in ratios if 0.8 <= r <= 1.2), len(ratios)))
-by_listings = sorted(both, key=lambda k: -items[k].get("listings", 0))[:15]
-print("top 15 by our listings: name | ours min/p10/med listings | TSM row")
-for k in by_listings:
-    o = items[k]; n = names.get(k, {}).get("en", "?")
-    print(f"  {n[:28]:28} | {o.get('min')}/{o.get('p10')}/{o.get('med')} {o.get('listings')} | {tsm[k]}")
+latest = (s.get_json("out/latest.json") or {}).get("items", {})
+allkeys = set()
+for p in s.list("raw/scans/"):
+    rec = json.loads(gzip.decompress(s.get(p)))
+    sc = rec["scan"]
+    lines = [l for l in sc["data"].split("\n") if l.count(",") >= 5]
+    keys = {l.split(",")[0] for l in lines}
+    allkeys |= keys
+    ids = {k.split(":")[0] for k in keys}
+    meta = {k: v for k, v in sc.items() if k != "data"}
+    top = {k: v for k, v in rec.items() if k != "scan"}
+    print(p, "| keys", len(keys), "| base ids", len(ids), "| units", sum(int(l.split(',')[4]) for l in lines), "| listings", sum(int(l.split(',')[5]) for l in lines))
+    print("   scan meta:", json.dumps(meta)[:400]); print("   record:", json.dumps(top)[:300])
+print("raw/names uploads:", s.list("raw/names/"))
+ids = {k.split(":")[0] for k in allkeys}
+print("all keys", len(allkeys), "base ids", len(ids), "named", len(ids & set(names)), "latest keys", len(latest))
