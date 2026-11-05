@@ -151,7 +151,7 @@ async function route() {
         setFresh("Waiting for the first scan");
       } else if (e instanceof Locked) {
         setHTML(main, lockedBlock());
-        setFresh("Members only");
+        setFresh("Signed out");
       } else {
         console.warn(e);
         setHTML(main, errorBlock());

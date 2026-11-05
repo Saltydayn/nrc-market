@@ -51,18 +51,21 @@ Movers · Deals · Insights · Watchlist (localStorage) · Search (`#/search?q=`
 - Class/subclass numbers for Forever are still a guess (as the brief says).
 - Time-of-day pattern needs ~7 days of hourly data to mean much; the page says so.
 
-## Launch state (marketsite, 4 Nov evening)
-- **Hosting:** Cloudflare Worker `nrc-market-site` with static assets (not Pages: the existing API token can deploy
-  Workers but not Pages). `.github/workflows/deploy-site.yml` deploys on every push to `main` that touches `site/`.
-  Only `index.html`, `css/`, `js/`, `fonts/`, `sample/` go online.
-- **Data:** `site/server/worker.js` serves `/data/<file>` from the private bucket (`out/` only, fixed file list), same
-  origin, no CORS, no public bucket. `DATA_ACCESS` in `server/wrangler.toml`: `members` (default) answers 401 for
-  existing files until Discord sign-in exists; `public` would open it to anyone with the link.
-- **data.js:** live site reads `/data/`. Sample data on localhost or with `?data=sample` (also on the live site);
-  `?data=live` forces live data on localhost. `FIRST_MONTH` = 2026-11 for live.
-- **Empty states:** no `latest.json` (or no items) → "Waiting for the first scan"; 401 → "Members only".
-- **Next:** Discord sign-in in the Worker (`signedIn()`), then members see live prices.
-- **TSM:** still only copied by the hourly job, not shown. Revisit when TSM has Forever files (`out/tsm_status.json`).
+## Hosting (marketsite, 5 Nov)
+- **Address:** https://naga-rave-cave.pages.dev/market/ — behind the guild site's Discord login. The guild site
+  (repo naga-rave-cave, `lib/market.js` + `functions/market*.js`) checks the session, strips `/market` and passes the
+  request to this Worker through the Pages service binding **`MARKET_SITE` → `nrc-market-site`** (set in the Pages dashboard).
+  Not logged in: pages redirect to `/api/auth/login?next=/market/`, data answers 401 (site shows "Signed out").
+- **Worker `nrc-market-site`:** `workers_dev = false`, so no public address; it trusts every request (only the guild site
+  can reach it). `run_worker_first`: `/data/<file>` from the private R2 bucket (`out/` only, fixed list), everything else
+  via `env.ASSETS`. Deployed by `.github/workflows/deploy-site.yml` on pushes to `main` touching `site/`.
+- **Paths:** all site paths must stay relative (`data/`, `css/…`), because the site lives under `/market/`.
+- **data.js:** live reads `data/`. Sample data on localhost or with `?data=sample`; `?data=live` forces live on localhost.
+  `FIRST_MONTH` = 2026-11 for live. Empty states: no `latest.json` → "Waiting for the first scan"; 401 → "Signed out".
+- **Local test of the whole path:** guild repo `bash dev/start.sh` (passes `--service MARKET_SITE=nrc-market-site`), then
+  run `wrangler dev` on an assembled copy of `site/server` + files in `public/` (start.sh kills running workers, so start
+  the market one after it). Log in at `localhost:8788/api/auth/login?next=/market/`.
+- **TSM:** still only copied by the hourly job, not shown.
 
 ## Ideas not done
 Estimated sales and cancellations (needs listing-level diffs), crafting margins (needs recipe data), TSM region values

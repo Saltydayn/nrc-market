@@ -95,11 +95,11 @@ export function waitingBlock() {
   </div>`;
 }
 
-// Data exists, but the visitor isn't signed in (sign-in isn't built yet).
+// The guild site said "not signed in" (the login ran out while the page was open).
 export function lockedBlock() {
   return html`<div class="state-msg state-wait">
-    <h1>Members only</h1>
-    <p>Guild prices are only for Naga Rave Cave members. Sign-in with Discord is coming soon.</p>
-    <p class="state-actions"><a class="state-link" href="?data=sample#/">Look around with sample data</a></p>
+    <h1>Signed out</h1>
+    <p>Your guild login has run out. Sign in again with Discord to see prices.</p>
+    <p class="state-actions"><a class="state-link" href="/api/auth/login?next=/market/">Sign in</a></p>
   </div>`;
 }

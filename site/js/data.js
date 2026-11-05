@@ -16,7 +16,7 @@ const LOCAL = (() => {
 })();
 export const IS_STRESS = PARAM === "stress";
 export const IS_SAMPLE = IS_STRESS || PARAM === "sample" || (LOCAL && PARAM !== "live");
-export const DATA_BASE = IS_SAMPLE ? "sample/out/" : "/data/";
+export const DATA_BASE = IS_SAMPLE ? "sample/out/" : "data/";
 const STRESS_LATEST = "sample/stress/latest.json";
 // Oldest month a daily file can exist for; months before it are never requested.
 export const FIRST_MONTH = IS_SAMPLE ? "2026-10" : "2026-11";

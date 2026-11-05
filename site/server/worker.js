@@ -1,26 +1,22 @@
-// The market site. Cloudflare serves the site's own files before this code runs, so it only
-// sees /data/... (the market files from the private R2 bucket) and paths that don't exist.
+// The market site. It has no public address of its own (workers_dev = false): visitors reach it
+// at naga-rave-cave.pages.dev/market/, where the guild site checks the Discord login and then
+// passes the request on through a service binding. So everything that arrives here is a member.
+//
+// The Worker runs first for every request: /data/... comes from the private R2 bucket,
+// everything else is one of the site's own files.
 
 const FILES = /^(latest\.json|names\.json|history\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{2}\.json|daily\/\d{4}-\d{2}\.json)$/;
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (!url.pathname.startsWith("/data/")) return text(404, "Not found");
     if (req.method !== "GET" && req.method !== "HEAD") return text(405, "Method not allowed");
+    if (!url.pathname.startsWith("/data/")) return env.ASSETS.fetch(req);
 
     const path = url.pathname.slice("/data/".length);
     if (!FILES.test(path)) return text(404, "Not found");
-    const key = "out/" + path;
 
-    // Members only, unless DATA_ACCESS is "public". "No data yet" is no secret, so a missing
-    // file answers 404 either way and the site can show its waiting state.
-    if (env.DATA_ACCESS !== "public" && !(await signedIn(req, env))) {
-      const head = await env.MARKET.head(key);
-      return head ? text(401, "Sign in first") : text(404, "Not found");
-    }
-
-    const obj = await env.MARKET.get(key, { onlyIf: req.headers });
+    const obj = await env.MARKET.get("out/" + path, { onlyIf: req.headers });
     if (!obj) return text(404, "Not found");
     const headers = new Headers({
       "content-type": "application/json; charset=utf-8",
@@ -31,11 +27,6 @@ export default {
     return new Response(req.method === "HEAD" ? null : obj.body, { headers });
   },
 };
-
-// Discord sign-in comes next; until then nobody counts as signed in.
-async function signedIn() {
-  return false;
-}
 
 // latest/names change hourly. Past days of history never change again.
 function cacheFor(path) {
