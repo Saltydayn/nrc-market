@@ -176,6 +176,7 @@ def run(store, now=None, icon_map=None, icon_cfg=None, lookup=None):
         store.put_json("out/flags.json", flags[-500:])
 
     names_done = merge_names(store, state, now, icon_map or {}, icon_cfg or {}, lookup)
+    write_ingame(store, now)
     cleaned = cleanup(store, done, hours, now)
     store.put_json("out/_state.json", state)
     return {"new_hours": len(touched), "names": names_done, "deleted": cleaned, "writes": store.writes}
@@ -239,6 +240,53 @@ def write_latest(store, shard, ladders, done, now):
         "lastScanHour": max((d[1] for d in done.values()), default=None),
         "items": items,
     })
+
+
+INGAME_FROM = "2026-11-08"      # launch week (5-7 Nov) left out of the usual price, like on the site
+
+
+def write_ingame(store, now):
+    """Small price file for GuildKit's tooltip (NRC Sync fetches it from the intake's GET /v1/prices):
+    out/ingame.txt, one line per item: id,market,usual,sold,vendor (copper; sold = per day across EU from TSM;
+    empty = unknown). market = our p10, or TSM's Horde price for items no guild scan has seen.
+    usual = median of the daily p10 of the last 7 days. Written only when something changed."""
+    latest = (store.get_json("out/latest.json") or {}).get("items") or {}
+    names = store.get_json("out/names.json") or {}
+    tsm = store.get_json("out/tsm.json") or {}
+    cols = tsm.get("cols") or []
+    tsm_items = tsm.get("items") or {}
+    ix = {c: cols.index(c) for c in ("min", "recent", "sold") if c in cols}
+    months = sorted({time.strftime("%Y-%m", time.gmtime(now - d * 86400)) for d in (0, 8)})
+    daily = {}
+    for m in months:
+        for k, per_day in (store.get_json(f"out/daily/{m}.json") or {}).items():
+            daily.setdefault(k.split(":")[0], {}).update(per_day)
+    cut = time.strftime("%Y-%m-%d", time.gmtime(now - 7 * 86400))
+    today = day_of(now)
+    market = {}
+    for k, v in latest.items():
+        i = k.split(":")[0]
+        if isinstance(v, dict) and v.get("p10") and (i not in market or v["p10"] < market[i]):
+            market[i] = v["p10"]                       # suffix variants: the cheapest, like the site
+    for i, v in tsm_items.items():
+        if i not in market and "recent" in ix:
+            price = v[ix["recent"]] or (v[ix["min"]] if "min" in ix else 0)
+            if price:
+                market[i] = price
+    lines = []
+    for i in sorted(set(market) | {i for i, e in names.items() if "sell" in e}, key=int):
+        days = [d[3] if len(d) > 3 else d[1] for day, d in (daily.get(i) or {}).items()
+                if cut <= day < today and day >= INGAME_FROM]
+        days.sort()
+        usual = days[len(days) // 2] if len(days) >= 3 else ""
+        t = tsm_items.get(i)
+        sold = t[ix["sold"]] if t and "sold" in ix and t[ix["sold"]] else ""
+        sell = names.get(i, {}).get("sell", "")
+        lines.append(f"{i},{market.get(i, '')},{usual},{sold},{sell}")
+    body = "# nrc-market in-game prices v1\n" + f"updated={now}\n" + "id,market,usual,sold,vendor\n" + "\n".join(lines) + "\n"
+    old = store.get("out/ingame.txt")
+    if old is None or old.decode("utf-8").split("\n", 2)[2] != body.split("\n", 2)[2]:
+        store.put("out/ingame.txt", body.encode("utf-8"))
 
 
 def _name_day(path):

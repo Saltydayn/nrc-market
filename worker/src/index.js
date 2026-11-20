@@ -4,6 +4,7 @@
 //   POST /v1/register  NRC Sync gets its own upload key on first start (no login; a few per IP per day)
 //   POST /v1/scans     up to 4 scans in one request (NRC Sync sends once an hour), Authorization: Bearer <key>
 //   POST /v1/names     item names for one client language
+//   GET  /v1/prices    in-game price file for GuildKit's tooltip (install key), see out/ingame.txt
 //   GET  /v1/health    quick check
 //
 // R2 layout:
@@ -218,6 +219,18 @@ async function postNames(request, env, now) {
   return json(200, { ok: true });
 }
 
+// Price file for GuildKit's tooltip (out/ingame.txt, written by the hourly job). Same install key as uploads.
+// Reads only, so no write limits; ETag lets NRC Sync ask "changed?" for almost nothing.
+async function getPrices(request, env) {
+  const who = await member(env, request);
+  if (!who) return json(401, { error: "key" });
+  const obj = await env.BUCKET.get("out/ingame.txt", { onlyIf: request.headers });
+  if (!obj) return json(404, { error: "no prices yet" });
+  const headers = { "content-type": "text/plain; charset=utf-8", etag: obj.httpEtag, "cache-control": "private, max-age=600" };
+  if (!("body" in obj) || !obj.body) return new Response(null, { status: 304, headers });
+  return new Response(obj.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -226,6 +239,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/scans") return await postScans(request, env, now);
       if (request.method === "POST" && url.pathname === "/v1/register") return await postRegister(request, env, now);
       if (request.method === "POST" && url.pathname === "/v1/names") return await postNames(request, env, now);
+      if (request.method === "GET" && url.pathname === "/v1/prices") return await getPrices(request, env);
       if (request.method === "GET" && url.pathname === "/v1/health") {
         const today = (await getJson(env, `limits/${day(now)}.json`))?.n || 0;
         return json(200, { ok: true, uploadsToday: today });

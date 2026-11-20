@@ -282,3 +282,21 @@ def test_tsm_price_history_for_the_chart(tmp_path):
     assert len(st.get_json("out/tsmhist/2026-11/1d.json")["2589"]) == 3
     tsm.run(st, cfg, now=T0 + 2 * H, fetch=lambda url: (200, snap("2026-11-07T13:00:00Z", 28)))   # unchanged
     assert len(st.get_json("out/tsmhist/2026-11/1d.json")["2589"]) == 3
+
+
+def test_ingame_price_file_for_the_tooltip(tmp_path):
+    st = LocalStore(tmp_path)
+    upload(st, "aaaa-1", T0 + 100, goods(1.0))
+    process.run(st, now=T0 + H)
+    names = st.get_json("out/names.json") or {}
+    names.setdefault("1000", {})["sell"] = 13
+    st.put_json("out/names.json", names)
+    st.put_json("out/tsm.json", {"cols": ["mv", "min", "recent", "hist", "sold", "rate", "avg", "regionMv"],
+                                 "items": {"1000": [0, 0, 0, 0, 55.5, 0, 0, 0], "77": [0, 400, 390, 0, 2.0, 0, 0, 0]}})
+    process.run(st, now=T0 + 2 * H)
+    text = st.get("out/ingame.txt").decode()
+    lines = {l.split(",")[0]: l for l in text.splitlines()[3:]}
+    p10 = st.get_json("out/latest.json")["items"]["1000"]["p10"]
+    assert lines["1000"] == f"1000,{p10},,55.5,13"          # usual needs 3+ days
+    assert lines["77"] == "77,390,,2.0,"                      # TSM-only item
+    assert text.startswith("# nrc-market in-game prices v1\nupdated=")

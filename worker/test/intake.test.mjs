@@ -176,3 +176,21 @@ test("checkScan spot-checks lines across the whole file", () => {
   const reason = checkScan(scan({ data: lines.join("\n"), items: 500 }), c, now());
   assert.match(reason, /^bad line/);
 });
+
+test("price file for the tooltip: install key only, 304 when unchanged", async () => {
+  const e = env();
+  e.BUCKET.get = async (k, opt) => {
+    if (k.startsWith("keys/")) return FakeBucket.prototype.get.call(e.BUCKET, k);
+    if (k !== "out/ingame.txt") return null;
+    const etag = '"v1"';
+    if (opt && opt.onlyIf && opt.onlyIf.get && opt.onlyIf.get("if-none-match") === etag) return { httpEtag: etag };
+    return { httpEtag: etag, body: "id,market,usual,sold,vendor\n2589,28,30,17268,13\n" };
+  };
+  const get = (headers) => worker.fetch(new Request("https://x/v1/prices", { headers }), e);
+  assert.equal((await get({})).status, 401);
+  let r = await get({ authorization: `Bearer ${KEY}` });
+  assert.equal(r.status, 200);
+  assert.match(await r.text(), /2589,28,30,17268,13/);
+  r = await get({ authorization: `Bearer ${KEY}`, "if-none-match": '"v1"' });
+  assert.equal(r.status, 304);
+});
