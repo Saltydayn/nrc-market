@@ -1,0 +1,5 @@
+{
+  "wowhead": "https://nether.wowhead.com/forever/tooltip/item/{id}",
+  "wowheadPerRun": 150,
+  "vendorPerRun": 800
+}

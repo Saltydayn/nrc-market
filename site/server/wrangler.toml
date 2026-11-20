@@ -1,0 +1,26 @@
+# The market website: site files as static assets + this Worker for /data/.
+# Deployed by .github/workflows/deploy-site.yml, which copies the site into ./public first.
+# No workers.dev address: the only way in is naga-rave-cave.pages.dev/market/ (guild login),
+# through the guild site's service binding MARKET_SITE.
+name = "nrc-market-site"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+preview_urls = false
+
+# Every hour at :07, start the hourly market job on GitHub (GitHub's own schedule skips hours).
+# Secret GH_DISPATCH_TOKEN is set in the Cloudflare dashboard, never here.
+[triggers]
+crons = ["7 * * * *"]
+
+[observability]
+enabled = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[r2_buckets]]
+binding = "MARKET"
+bucket_name = "nrc-market"

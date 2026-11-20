@@ -1,0 +1,60 @@
+name: TSM check
+# Prints what TSM's public Forever files hold right now: size, columns, how many rows have prices,
+# and the rows for the item IDs you give; then compares TSM's copies in R2 with our prices. Stores nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "Item IDs to show, comma separated"
+        default: "2589,2592,4306,2770,2771,2772,13468,14047,12359,7912"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the files
+        env:
+          IDS: ${{ inputs.ids }}
+        run: |
+          python3 - <<'EOF'
+          import csv, io, os, urllib.request
+          base = "https://public-data.tradeskillmaster.com/forever/eu/"
+          ids = {i.strip() for i in os.environ.get("IDS", "").split(",") if i.strip()}
+          for path in ("region/items.csv", "realm/normal-horde/items.csv"):
+              print(f"\n=== {path}")
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(base + path, headers={"User-Agent": "nrc-market/1"}), timeout=60) as r:
+                      body = r.read().decode("utf-8", "replace")
+                      print("last-modified:", r.headers.get("Last-Modified"))
+              except Exception as e:
+                  print("failed:", e)
+                  continue
+              rows = list(csv.DictReader(io.StringIO(body)))
+              print("bytes:", len(body), "rows:", len(rows))
+              if not rows:
+                  print("header:", body.splitlines()[:1])
+                  continue
+              cols = list(rows[0])
+              print("columns:", cols)
+              for c in cols:
+                  vals = [r[c] for r in rows if r[c] not in ("", "0")]
+                  print(f"  {c}: {len(vals)} filled, e.g. {vals[:3]}")
+              print("first rows:")
+              for r in rows[:5]:
+                  print("  ", dict(r))
+              print("asked for:")
+              for r in rows:
+                  if (r.get("itemId") or r.get("itemString") or "").split(":")[0].replace("i", "") in ids:
+                      print("  ", dict(r))
+          EOF
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install boto3==1.35.*
+      - name: Compare with our prices
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python jobs/tsm_compare.py

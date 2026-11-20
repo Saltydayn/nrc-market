@@ -1,0 +1,35 @@
+name: Deploy market site
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/deploy-site.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test site/test/*.test.mjs
+      # Only what visitors need goes online: no docs, tests, tools or screenshots.
+      - name: Assemble
+        run: |
+          mkdir -p _deploy/public
+          cp site/server/worker.js site/server/wrangler.toml _deploy/
+          cp -r site/index.html site/css site/js site/fonts site/sample _deploy/public/
+      - name: Check Cloudflare secrets
+        id: secrets
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "No CLOUDFLARE_API_TOKEN, skipping deploy."; echo "ok=false" >> "$GITHUB_OUTPUT"; else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.secrets.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: _deploy
+          wranglerVersion: "4"

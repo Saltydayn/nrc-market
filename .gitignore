@@ -1,0 +1,4 @@
+node_modules/
+__pycache__/
+.wrangler/
+.pytest_cache/

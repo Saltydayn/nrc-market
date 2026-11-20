@@ -1,0 +1,18 @@
+name = "nrc-market"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "nrc-market"
+
+[vars]
+ALLOWED_REGIONS = "EU"
+ALLOWED_FACTIONS = "Horde"
+ALLOWED_GUILDS = ""            # set to the exact guild name once it exists, e.g. "Naga Rave Cave"
+PER_KEY_PER_HOUR = "3"         # NRC Sync sends once an hour (+ retries)
+SCANS_PER_HOUR = "8"           # scans kept per hour of the day; more add nothing
+KEYS_PER_IP_PER_DAY = "5"
+DAILY_UPLOAD_CAP = "4000"
+MONTHLY_WRITE_CAP = "300000"
