@@ -1,7 +1,7 @@
 // Deals: listings you can buy out and relist at a profit, and items cheaper than usual.
 import { html, setHTML, $ } from "../dom.js";
 import { fmtInt, fmtPct, fmtSold, moneyText } from "../format.js";
-import { flipDeal, vendorDeal, nearVendor, findSignals, getRange, AH_CUT } from "../analysis.js";
+import { flipDeal, vendorDeal, nearVendor, smallGapVendor, findSignals, getRange, AH_CUT } from "../analysis.js";
 import { money, itemIcon, itemName, warnings, confidence } from "../ui/bits.js";
 import { itemHref, bindRowClicks, PAGE } from "../ui/table.js";
 import { catLabel } from "../categories.js";
@@ -25,6 +25,8 @@ export async function render(root, { market }) {
   // safest first: smallest gap to the vendor price, busy markets before slow ones
   const nearAll = market.rows.map((r) => [r, nearVendor(r)]).filter(([, d]) => d)
     .sort((a, b) => a[1].over - b[1].over || (b[0].sold ?? 0) - (a[0].sold ?? 0));
+  const smallAll = market.rows.map((r) => [r, smallGapVendor(r)]).filter(([, d]) => d)
+    .sort((a, b) => a[1].risk - b[1].risk || (b[0].sold ?? 0) - (a[0].sold ?? 0));
   const vendNote = withSell < market.rows.length * 0.8
     ? html`<p class="note">Vendor prices are still being collected (${fmtInt(withSell)} of ${fmtInt(market.rows.length)} items so far), so this list grows over the next day.</p>` : "";
 
@@ -52,9 +54,14 @@ export async function render(root, { market }) {
       <div class="panel-h"><h2 id="near-h">Close to vendor price</h2><span class="panel-note">${fmtInt(nearAll.length)} items · within 50%</span></div>
       <div class="panel-b deals-explain"><p class="note">Market price at most 50% above what a vendor pays, closest first. Safe holds: if the price
         goes up you sell on the AH, if not you vendor them and lose at most the gap. "Max loss" is per unit.</p>${vendNote}</div>
-      <div class="list-ctl panel-b"><div class="seg" role="group" aria-label="Show">
-        ${NEAR_KINDS.map((k) => html`<button type="button" data-near="${k.id}" aria-pressed="${k.id === "all"}">${k.label}</button>`)}</div></div>
       <div id="near"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="small-h">
+      <div class="panel-h"><h2 id="small-h">Cheap items near vendor</h2><span class="panel-note">${fmtInt(smallAll.length)} items · lose at most 1s each</span></div>
+      <div class="panel-b deals-explain"><p class="note">Cheap items where the percentage looks big but the coins don't: vendor 30c, market 1s is +233%,
+        yet you lose at most 70c per item if you end up vendoring it. Kept apart from the list above so the percentages don't mislead.</p></div>
+      <div id="small"></div>
     </section>
 
     <section class="panel" aria-labelledby="flip-h">
@@ -88,34 +95,35 @@ export async function render(root, { market }) {
         <td class="num"><span class="chg chg-up">${fmtPct(d.margin, { sign: false })}</span></td></tr>`)}</tbody></table>
       ${flips.length > limit ? html`<div class="table-more panel-f"><button class="btn" type="button" data-action="more">Show more</button></div>` : ""}`);
   }
-  let nearLimit = 50, nearKind = "all";
-  function paintNear() {
-    const nb = $("#near", root);
-    const kind = NEAR_KINDS.find((k) => k.id === nearKind);
-    const near = nearAll.filter(([r]) => kind.test(r));
-    if (!near.length) { setHTML(nb, html`<p class="panel-empty">No item trades this close to its vendor price right now.</p>`); return; }
-    setHTML(nb, html`<table class="tbl deal-tbl"><thead><tr>
+  const lists = { near: { all: nearAll, limit: 50, kind: "all" }, small: { all: smallAll, limit: 50, kind: "all" } };
+  function paintVend(id) {
+    const st = lists[id];
+    const nb = $("#" + id, root);
+    const kind = NEAR_KINDS.find((k) => k.id === st.kind);
+    const rows = st.all.filter(([r]) => kind.test(r));
+    const chips = html`<div class="list-ctl panel-b"><div class="seg" role="group" aria-label="Show">
+      ${NEAR_KINDS.map((k) => html`<button type="button" data-kind="${k.id}" data-list="${id}" aria-pressed="${k.id === st.kind}">${k.label}</button>`)}</div></div>`;
+    if (!rows.length) { setHTML(nb, html`${chips}<p class="panel-empty">Nothing here right now.</p>`); return; }
+    setHTML(nb, html`${chips}<table class="tbl deal-tbl"><thead><tr>
           <th scope="col">Item</th><th class="num" scope="col">Market</th><th class="num" scope="col">Vendor pays</th>
           <th class="num" scope="col">Above vendor</th><th class="num" scope="col">Max loss</th><th class="num" scope="col">Sold/day</th></tr></thead>
-        <tbody>${near.slice(0, nearLimit).map(([r, d]) => html`<tr data-href="${itemHref(r)}">
+        <tbody>${rows.slice(0, st.limit).map(([r, d]) => html`<tr data-href="${itemHref(r)}">
           <td class="c-item"><a class="item-link" href="${itemHref(r)}" title="${r.name}">${itemIcon(r, "medium")}<span class="item-text">${itemName(r)}<span class="item-sub">${r.cat ? catLabel(r.cat) : "#" + r.id} · ${fmtInt(r.units)} listed</span></span></a></td>
           <td class="num c-p10">${money(r.p10)}</td>
           <td class="num">${money(r.sell)}</td>
           <td class="num">${fmtPct(d.over, { sign: false })}</td>
           <td class="num">${money(d.risk)}</td>
           <td class="num">${fmtSold(r.sold)}</td></tr>`)}</tbody></table>
-        ${near.length > nearLimit ? html`<div class="table-more panel-f"><button class="btn" type="button" data-action="more-near">Show more</button><span class="muted">${fmtInt(nearLimit)} of ${fmtInt(near.length)}</span></div>` : ""}`);
+        ${rows.length > st.limit ? html`<div class="table-more panel-f"><button class="btn" type="button" data-more-list="${id}">Show more</button><span class="muted">${fmtInt(st.limit)} of ${fmtInt(rows.length)}</span></div>` : ""}`);
   }
+  const paintNear = () => { paintVend("near"); paintVend("small"); };
   paintNear();
   root.addEventListener("click", (e) => {
     if (e.target.closest("[data-action=more]")) { limit += PAGE; paintFlips(); }
-    if (e.target.closest("[data-action=more-near]")) { nearLimit += 50; paintNear(); }
-    const nk = e.target.closest("[data-near]");
-    if (nk) {
-      nearKind = nk.dataset.near; nearLimit = 50;
-      root.querySelectorAll("[data-near]").forEach((b) => b.setAttribute("aria-pressed", String(b === nk)));
-      paintNear();
-    }
+    const more = e.target.closest("[data-more-list]");
+    if (more) { lists[more.dataset.moreList].limit += 50; paintVend(more.dataset.moreList); }
+    const nk = e.target.closest("[data-kind]");
+    if (nk) { const st = lists[nk.dataset.list]; st.kind = nk.dataset.kind; st.limit = 50; paintVend(nk.dataset.list); }
   });
   paintFlips();
 

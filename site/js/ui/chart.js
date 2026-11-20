@@ -145,18 +145,20 @@ export function createChart(host, opts) {
     }
     s += `<line class="axis" x1="${ML}" x2="${ML + plotW}" y1="${vB}" y2="${vB}"/>`;
 
-    // price lines; a step longer than 1.5× the data step is a gap
+    // price lines; a step longer than 1.5× the data step (or the line's own maxGap) is a gap.
+    // Points without a value for this line are skipped: lines can have different timestamps.
     for (const l of o.lines) {
+      const maxGap = l.maxGap || o.step * 1.5;
       let d = "", dots = "", marks = "", prev = null, run = 0, runStart = null, nClip = 0;
       const flush = () => { if (run === 1 && runStart) dots += `<circle cx="${runStart[0]}" cy="${runStart[1]}" r="2"/>`; };
       for (const p of pts) {
         const v = p[l.key];
-        if (!Number.isFinite(v)) { flush(); prev = null; run = 0; continue; }
+        if (!Number.isFinite(v)) continue;
         const edge = v > hi ? "hi" : v < lo ? "lo" : null;
         const x = xs(p.t).toFixed(1);
         const y = ys(Math.min(hi, Math.max(lo, v))).toFixed(1);
         if (edge) { marks += edge === "hi" ? `<path d="M${x} ${pT}l-3.5 6h7z"/>` : `<path d="M${x} ${pB}l-3.5 -6h7z"/>`; nClip++; }
-        const gap = !prev || p.t - prev.t > o.step * 1.5;
+        const gap = !prev || p.t - prev.t > maxGap;
         if (gap) { flush(); run = 0; runStart = [x, y]; }
         d += `${gap ? "M" : "L"}${x} ${y}`;
         run++;

@@ -186,7 +186,7 @@ def test_tsm_copies_only_changed_files_and_reports_probes(tmp_path):
     body = {"https://x/retail/eu/commodities.csv": b"itemId,minBuyout\n2589,100\n"}
     fetch = lambda url: (200, body[url]) if url in body else (404, None)
     r = tsm.run(st, cfg, now=T0, fetch=fetch)
-    assert r == {"copied": 1, "found": ["retail/eu/commodities.csv"]}
+    assert r == {"copied": 1, "found": ["retail/eu/commodities.csv"], "histFiles": 0}
     r = tsm.run(st, cfg, now=T0 + H, fetch=fetch)
     assert r["copied"] == 0                              # unchanged: not stored again
     body["https://x/forever/eu/region/items.csv"] = b"itemId,marketValue\n1,2\n"
@@ -264,3 +264,21 @@ def test_vendor_asks_busiest_items_first():
     lookup = lambda i: (asked.append(i), (True, None, None, None, 100))[1]
     icons.fill_vendor(names, {}, lookup, per_run=1, prio={"273128": 96, "25": 2})
     assert asked == ["273128"]
+
+
+def test_tsm_price_history_for_the_chart(tmp_path):
+    st = LocalStore(tmp_path)
+    realm = "forever/eu/realm/normal-horde/items.csv"
+    cfg = {"base": "https://x", "files": [realm], "site": {"realm": realm}}
+    snap = lambda t, p: (f"itemId,name,marketValue,minBuyout,recent,historical,updatedAt\n"
+                         f"2589,Linen Cloth,{p + 2},{p},0,0,{t}\n").encode()
+    bodies = [snap("2026-11-07T05:00:00Z", 24), snap("2026-11-07T09:00:00Z", 30)]
+    # one copy already stored before the history existed: the first run builds from all copies
+    st.put("tsm/forever/eu/realm/normal-horde/items/2026-11-07/0500.csv.gz", __import__("gzip").compress(bodies[0]))
+    tsm.run(st, cfg, now=T0, fetch=lambda url: (200, bodies[1]))
+    h = st.get_json("out/tsmhist/2026-11/1d.json")["2589"]
+    assert [p[1:] for p in h] == [[24, 26], [30, 32]]
+    tsm.run(st, cfg, now=T0 + H, fetch=lambda url: (200, snap("2026-11-07T13:00:00Z", 28)))
+    assert len(st.get_json("out/tsmhist/2026-11/1d.json")["2589"]) == 3
+    tsm.run(st, cfg, now=T0 + 2 * H, fetch=lambda url: (200, snap("2026-11-07T13:00:00Z", 28)))   # unchanged
+    assert len(st.get_json("out/tsmhist/2026-11/1d.json")["2589"]) == 3

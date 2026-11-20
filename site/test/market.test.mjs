@@ -4,7 +4,7 @@ import { classify, findNode } from "../js/categories.js";
 import { parseLadder, shardOf, buildRows, parseTsm, addTsm, agreedChange } from "../js/model.js";
 import {
   isMoverCandidate, flipDeal, rangeChange, getRange, trendOf, usualRange, monthsBetween, hourProfile, topMovers,
-  setTrendFrom, findSignals, vendorDeal, nearVendor, matStats,
+  setTrendFrom, findSignals, vendorDeal, nearVendor, matStats, smallGapVendor,
 } from "../js/analysis.js";
 import { fmtPct } from "../js/format.js";
 import { normalize, buildIndex, search } from "../js/search.js";
@@ -261,4 +261,10 @@ test("raid mat stats: lowest since launch, usual price, EU value", () => {
   assert.equal(st.low, 100);
   assert.equal(st.vsEu, -0.5);
   assert.equal(st.cheap, true);
+});
+
+test("cheap items near vendor: big %, small coins", () => {
+  assert.equal(smallGapVendor(it({ sell: 30, p10: 100, listings: 5 })).risk, 70);
+  assert.equal(smallGapVendor(it({ sell: 30, p10: 200, listings: 5 })), null);   // 1s70c loss: too much
+  assert.equal(smallGapVendor(it({ sell: 100, p10: 140, listings: 5 })), null);  // within 50%: the other list
 });

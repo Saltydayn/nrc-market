@@ -367,6 +367,7 @@ select.field { min-width: 0; padding-right: var(--sp2); }
 .chart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart .l-a { stroke: var(--accent); fill: var(--accent); }
 .chart .l-b { stroke: #8fa0b3; fill: #8fa0b3; }
+.chart .l-c { stroke: #6f9fd8; fill: #6f9fd8; stroke-dasharray: 4 3; }
 .chart path.ln { fill: none; }
 .chart .clip-mark path { fill: var(--text-3); stroke: none; }
 .chart .xh-line { stroke: var(--text-3); stroke-dasharray: 2 3; }
@@ -390,6 +391,7 @@ select.field { min-width: 0; padding-right: var(--sp2); }
 .legend i { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
 .legend .lg-a { background: var(--accent); }
 .legend .lg-b { background: #8fa0b3; }
+.legend .lg-c { background: repeating-linear-gradient(90deg, #6f9fd8 0 4px, transparent 4px 7px); }
 .legend .lg-v { height: 8px; width: 8px; background: rgba(185, 176, 160, 0.35); }
 
 /* ---------- phone ---------- */

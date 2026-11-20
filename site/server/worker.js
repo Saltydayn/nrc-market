@@ -8,7 +8,7 @@
 // It also starts the hourly market job on GitHub (see scheduled below), because GitHub's own
 // timer skips most hours.
 
-const FILES = /^(latest\.json|names\.json|tsm\.json|history\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{2}\.json|daily\/\d{4}-\d{2}\.json)$/;
+const FILES = /^(latest\.json|names\.json|tsm\.json|history\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{2}\.json|daily\/\d{4}-\d{2}\.json|tsmhist\/\d{4}-\d{2}\/[0-9a-f]{2}\.json)$/;
 
 export default {
   async fetch(req, env) {

@@ -129,3 +129,17 @@ export async function loadHistory(key, fromT, onPart) {
   if (failed && !points.length) throw new Error("history failed");
   return points;
 }
+
+// TSM's lowest price for one item from the realm snapshots (every 2-8 h since 7 Nov), month files per shard.
+// Fills the hours nobody in the guild scanned. Points: {t, min, mv}.
+export async function loadTsmHistory(key, fromT) {
+  const id = String(key).split(":")[0];
+  const shard = shardOf(id);
+  const months = monthsBetween(fromT, now(), FIRST_MONTH);
+  const files = await Promise.all(months.map((m) => getJSON(`${DATA_BASE}tsmhist/${m}/${shard}.json`, { optional: true }).catch(() => null)));
+  const out = [];
+  for (const f of files) {
+    for (const [t, min, mv] of (f && f[id]) || []) if (t >= fromT && min > 0) out.push({ t, min, mv });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}

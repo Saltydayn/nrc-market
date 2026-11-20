@@ -194,6 +194,16 @@ export function nearVendor(row, { within = 0.5 } = {}) {
   return { over, risk: row.p10 - row.sell };
 }
 
+// Cheap items where the % gap looks big but the coins don't: vendor 30c, market 1s = +233%, yet you can lose
+// at most 70c per item. Only what the % list above doesn't already show.
+export function smallGapVendor(row, { maxLoss = 100, within = 0.5 } = {}) {
+  if (!(row.sell >= 5) || !(row.p10 > 0) || (row.q ?? 1) < 1 || (row.listings ?? 0) < 3) return null;
+  const over = row.p10 / row.sell - 1;
+  if (over <= within) return null;
+  const risk = row.p10 - row.sell;
+  return risk <= maxLoss ? { over, risk } : null;
+}
+
 // Raid mats page: today's price against its own history and TSM's EU-wide value.
 export function matStats(row, series, today) {
   const past = (series || []).filter((d) => d.date < today && d.p10 > 0 && afterLaunch(d));

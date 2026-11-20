@@ -7,7 +7,7 @@ import { parseLadder, baseId, suffixOf, MIN_LISTINGS } from "../model.js";
 import {
   CHART_RANGES, getRange, chartUsesHourly, rangeSeconds, rangeChange, trendOf, usualRange, dataQuality, hourProfile, similarItems,
 } from "../analysis.js";
-import { loadHistory, loadDaily } from "../data.js";
+import { loadHistory, loadDaily, loadTsmHistory } from "../data.js";
 import { isWatched, toggleWatch } from "../store.js";
 import { money, change, itemIcon, itemName, warnings, confidence } from "../ui/bits.js";
 import { icon } from "../ui/icons.js";
@@ -128,20 +128,22 @@ export async function render(root, { market, parts, query }) {
   async function loadChart() {
     const my = ++token;
     const hourlyMode = chartUsesHourly(range);
-    const lines = hourlyMode
-      ? [{ key: "a", cls: "l-a", label: "Market price" }, { key: "b", cls: "l-b", label: "Median" }]
-      : [{ key: "a", cls: "l-a", label: "Market price" }, { key: "b", cls: "l-b", label: "Median" }];
+    // TSM snapshots come every 2-8 hours: their line only breaks after half a day without one
+    const tsmLine = { key: "c", cls: "l-c", label: "TSM lowest", maxGap: (hourlyMode ? 12 : 2.5 * 24) * 3600 };
+    const lines = [{ key: "a", cls: "l-a", label: "Market price" }, { key: "b", cls: "l-b", label: "Median" }, tsmLine];
     setHTML($("#hist-legend", root), html`${lines.map((l) => html`<span><i class="lg-${l.key}"></i>${l.label}</span>`)}<span><i class="lg-v"></i>Units listed</span>`);
     const tip = (p) => `<div class="t">${hourlyMode ? `${fmtDay(p.t, { weekday: true })}, ${fmtClock(p.t)}` : fmtDay(p.t, { weekday: true })}</div><dl>
-      <dt>${lines[0].label}</dt><dd>${String(money(p.a))}</dd><dt>Median</dt><dd>${String(money(p.b))}</dd>
-      ${hourlyMode ? `<dt>Min</dt><dd>${String(money(p.m))}</dd>` : ""}
-      <dt>Supply</dt><dd>${fmtInt(p.u)}</dd>${hourlyMode ? `<dt>Listings</dt><dd>${fmtInt(p.l)}</dd>` : ""}</dl>`;
+      ${Number.isFinite(p.a) ? `<dt>${lines[0].label}</dt><dd>${String(money(p.a))}</dd><dt>Median</dt><dd>${String(money(p.b))}</dd>` : `<dt>Our scans</dt><dd>none this ${hourlyMode ? "hour" : "day"}</dd>`}
+      ${Number.isFinite(p.c) ? `<dt>TSM lowest</dt><dd>${String(money(p.c))}</dd>` : ""}
+      ${hourlyMode && Number.isFinite(p.m) ? `<dt>Min</dt><dd>${String(money(p.m))}</dd>` : ""}
+      ${Number.isFinite(p.u) ? `<dt>Supply</dt><dd>${fmtInt(p.u)}</dd>` : ""}${hourlyMode && Number.isFinite(p.l) ? `<dt>Listings</dt><dd>${fmtInt(p.l)}</dd>` : ""}</dl>`;
     chart.update([], { lines, tip, step: hourlyMode ? 3600 : 86400, emptyText: "Loading history…" });
     const note = $("#hist-note", root);
     note.textContent = "";
     const from = range.days === Infinity ? -Infinity : t - rangeSeconds(range);
     try {
       let pts;
+      const tsmP = loadTsmHistory(chartKey, from).catch(() => []);
       if (hourlyMode) {
         pts = await loadHistory(chartKey, from, (part) => { if (my === token) chart.update(part); });
         hourly = pts;
@@ -149,14 +151,17 @@ export async function render(root, { market, parts, query }) {
         const d = await loadDaily(range);
         pts = d.seriesOf(chartKey).filter((x) => x.t >= from).map((x) => ({ t: x.t, a: x.p10, b: x.med, u: x.units }));
       }
+      const tsm = await tsmP;
       if (my !== token) return;
+      if (tsm.length) pts = mergeTsm(pts, tsm, hourlyMode);
       chart.update(pts, { emptyText: "No history in this range yet." });
       const bits = [];
       if (pts.length && (range.days === Infinity || pts[0].t > from + (hourlyMode ? 6 * 3600 : 2 * 86400))) bits.push(`History starts ${fmtDay(pts[0].t)}.`);
       if (row.variants && !focus) bits.push(`Shows variant ${fmtSuffix(suffixOf(chartKey))}, the cheapest right now.`);
+      if (tsm.length) bits.push("TSM lowest: the cheapest listing TSM users saw on the Horde AH, every few hours. It fills the gaps between our scans.");
       if (chart.clipped()) bits.push("Small marks at the top or bottom edge are points far outside the usual range, cut off so they don't flatten the chart.");
       note.textContent = bits.join(" ");
-      renderTimeOfDay(hourlyMode ? pts : null);
+      renderTimeOfDay(hourlyMode ? hourly : null);
     } catch (e) {
       console.warn(e);
       if (my !== token) return;
@@ -433,3 +438,26 @@ function unknown(root, market, id) {
   });
 }
 
+
+// TSM points go in as their own points (hourly charts) or as the day's median (daily charts).
+function mergeTsm(pts, tsm, hourlyMode) {
+  if (hourlyMode) {
+    const out = pts.slice();
+    for (const x of tsm) out.push({ t: x.t, c: x.min });
+    return out.sort((a, b) => a.t - b.t);
+  }
+  const byDay = new Map();
+  for (const x of tsm) {
+    const d = Math.floor(x.t / 86400) * 86400;
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(x.min);
+  }
+  const out = pts.map((p) => ({ ...p }));
+  const at = new Map(out.map((p) => [p.t, p]));
+  for (const [d, v] of byDay) {
+    v.sort((a, b) => a - b);
+    const m = v[v.length >> 1];
+    if (at.has(d)) at.get(d).c = m; else out.push({ t: d, c: m });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
