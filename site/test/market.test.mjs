@@ -188,6 +188,20 @@ test("search: normalisation, multi-word, ranking", () => {
   assert.deepEqual(search(idx, ""), []);
 });
 
+test("search: German names find the same item", () => {
+  assert.equal(normalize("Großer Heiltrank"), "grosser heiltrank");
+  const rows = [
+    { id: "2589", name: "Linen Cloth", de: "Leinenstoff", named: true, listings: 40 },
+    { id: "13446", name: "Major Healing Potion", de: "Erheblicher Heiltrank", named: true, listings: 8 },
+    { id: "1710", name: "Greater Healing Potion", de: "Großer Heiltrank", named: true, listings: 3 },
+  ];
+  const idx = buildIndex(rows);
+  assert.deepEqual(search(idx, "leinen").map((r) => r.id), ["2589"]);
+  assert.deepEqual(search(idx, "heiltrank").map((r) => r.id), ["13446", "1710"]);
+  assert.deepEqual(search(idx, "grosser heil").map((r) => r.id), ["1710"]);
+  assert.deepEqual(search(idx, "healing").map((r) => r.id), ["13446", "1710"]);
+});
+
 test("TSM adds sales to our rows and search-only rows for items we never scanned", () => {
   const latest = { items: { 2589: { min: 23, p10: 24, med: 25, units: 100, listings: 10, seen: 1 } } };
   const names = { 2589: { en: "Linen Cloth", q: 1, cls: 7, sub: 5 }, 934: { en: "Stalvan's Reaper", q: 3, cls: 2, sub: 1 } };

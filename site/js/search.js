@@ -1,8 +1,9 @@
-// Item search: English names and item IDs. Index is built once per data load.
+// Item search: English names, German names and item IDs. Index is built once per data load.
 
 export function normalize(s) {
   return String(s || "")
     .toLowerCase()
+    .replace(/ß/g, "ss")
     .normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/['’`´]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
@@ -12,8 +13,17 @@ export function normalize(s) {
 export function buildIndex(rows) {
   return rows.map((row) => {
     const norm = normalize(row.named ? row.name : "");
-    return { row, norm, words: norm ? norm.split(" ") : [] };
+    const de = normalize(row.de || "");
+    return { row, norm, words: norm ? norm.split(" ") : [], de, deWords: de ? de.split(" ") : [] };
   });
+}
+
+// Rank of one name for the query, or null if not every word is in it.
+function rankIn(norm, words, nq, tokens) {
+  if (!norm || !tokens.every((t) => norm.includes(t))) return null;
+  if (norm.startsWith(nq)) return 0;
+  if (tokens.every((t) => words.some((w) => w.startsWith(t)))) return 1;
+  return 2;
 }
 
 // All query words must appear somewhere (any order). Ranking: name starts with the query,
@@ -27,16 +37,15 @@ export function search(index, q, limit = Infinity) {
   for (const e of index) {
     let rank;
     if (isId && e.row.id === nq) rank = -1;
-    else if (!e.norm) {
-      if (isId && e.row.id.startsWith(nq)) rank = 3;
-      else continue;
-    } else {
-      if (!tokens.every((t) => e.norm.includes(t))) {
+    else {
+      const en = rankIn(e.norm, e.words, nq, tokens);
+      const de = rankIn(e.de, e.deWords, nq, tokens);
+      rank = en ?? de;
+      if (en != null && de != null) rank = Math.min(en, de);
+      if (rank == null) {
         if (isId && e.row.id.startsWith(nq)) rank = 3;
         else continue;
-      } else if (e.norm.startsWith(nq)) rank = 0;
-      else if (tokens.every((t) => e.words.some((w) => w.startsWith(t)))) rank = 1;
-      else rank = 2;
+      }
     }
     hits.push([rank, e.row]);
   }

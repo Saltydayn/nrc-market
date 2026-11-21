@@ -47,6 +47,7 @@ export async function render(root, { market, parts, query }) {
       <div class="item-h-text">
         <h1>${itemName(row, { tag: "span" })}${focus ? html` <span class="variant-tag">Variant ${fmtSuffix(focus.suffix)}</span>` : ""}</h1>
         <p class="item-meta">${[
+          row.de && row.de !== row.name ? `German: ${row.de}` : null,
           row.cat ? catLabel(row.cat) : "Not categorised yet",
           row.ilvl ? `Item level ${row.ilvl}` : null,
           row.req > 0 ? `Requires level ${row.req}` : null,
@@ -397,7 +398,7 @@ function tsmOnlyPage(root, market, row) {
       ${itemIcon(row, "large")}
       <div class="item-h-text">
         <h1>${itemName(row, { tag: "span" })}</h1>
-        <p class="item-meta">${[row.cat ? catLabel(row.cat) : null, row.ilvl ? `Item level ${row.ilvl}` : null, `ID ${row.id}`].filter(Boolean).join(" · ")}</p>
+        <p class="item-meta">${[row.de && row.de !== row.name ? `German: ${row.de}` : null, row.cat ? catLabel(row.cat) : null, row.ilvl ? `Item level ${row.ilvl}` : null, `ID ${row.id}`].filter(Boolean).join(" · ")}</p>
       </div>
       <div class="item-actions">
         <a class="btn btn-ghost" href="${WOWHEAD}${row.id}" target="_blank" rel="noopener noreferrer">Wowhead ${icon("external", { size: 14 })}</a>

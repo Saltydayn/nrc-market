@@ -102,9 +102,11 @@ def test_old_uploads_are_deleted(tmp_path):
     assert r["deleted"] == 1 and st.list("raw/scans/") == [] and st.list("out/history/") == []
 
 
-def test_names_english_only_with_icons(tmp_path):
+def test_names_english_and_german_with_icons(tmp_path):
     st = LocalStore(tmp_path)
-    st.put_json("raw/names/deDE/Salty-2026-11-05.json.gz", {"names": {"2589": "Leinenstoff|1|7|5|5|0|200"}})
+    st.put_json("raw/names/deDE/Salty-2026-11-05.json.gz", {"names": {
+        "2589": "Leinenstoff|1|7|5|5|0|200",
+        "4306": "Seidenstoff|1|7|5|25|0|200"}})             # only a German client has seen it -> English from Wowhead
     st.put_json("raw/names/enUS/Other-2026-11-05-101500.json.gz", {"names": {
         "2589": "Linen Cloth|1|7|5|5|0|200|132889",      # GuildKit 0.13.4+: icon file ID
         "2592": "Wool Cloth|1|7|5|15|0|200",             # older GuildKit: no icon ID -> Wowhead backup
@@ -115,21 +117,22 @@ def test_names_english_only_with_icons(tmp_path):
         return (True, {"2592": "inv_fabric_wool_01"}.get(i), None, None)
     process.run(st, now=T0, icon_map={132889: "inv_fabric_linen_01"}, icon_cfg={"wowheadPerRun": 10}, lookup=lookup)
     n = st.get_json("out/names.json")
-    assert n["2589"] == {"en": "Linen Cloth", "q": 1, "cls": 7, "sub": 5, "ilvl": 5, "req": 0, "stack": 200,
+    assert n["2589"] == {"en": "Linen Cloth", "de": "Leinenstoff", "q": 1, "cls": 7, "sub": 5, "ilvl": 5, "req": 0, "stack": 200,
                          "iconId": 132889, "icon": "inv_fabric_linen_01"}
     assert n["2592"]["icon"] == "inv_fabric_wool_01" and "icon" not in n["9999"]
-    assert sorted(asked) == ["2592", "9999"]
+    assert n["4306"]["de"] == "Seidenstoff" and "en" not in n["4306"]
+    assert sorted(asked) == ["2592", "4306", "9999"]
     # next run: Wowhead answers are remembered, misses wait a week
     asked.clear()
     process.run(st, now=T0 + H, icon_map={132889: "inv_fabric_linen_01"}, icon_cfg={"wowheadPerRun": 10}, lookup=lookup)
     assert asked == [] and st.get_json("out/names.json")["2592"]["icon"] == "inv_fabric_wool_01"
     process.run(st, now=T0 + 8 * 86400, icon_map={132889: "inv_fabric_linen_01"}, icon_cfg={"wowheadPerRun": 10}, lookup=lookup)
-    assert asked == ["9999"]
+    assert sorted(asked) == ["4306", "9999"]
     # a new Wowhead address asks again right away for what the old one missed, keeps what it found
     asked.clear()
     process.run(st, now=T0 + 8 * 86400 + H, icon_map={132889: "inv_fabric_linen_01"},
                 icon_cfg={"wowheadPerRun": 10, "wowhead": "https://example/forever/{id}"}, lookup=lookup)
-    assert asked == ["9999"] and st.get_json("out/names.json")["2592"]["icon"] == "inv_fabric_wool_01"
+    assert sorted(asked) == ["4306", "9999"] and st.get_json("out/names.json")["2592"]["icon"] == "inv_fabric_wool_01"
 
 
 def test_wowhead_names_items_the_game_has_not_named_and_game_wins_later(tmp_path):
@@ -168,15 +171,35 @@ def test_names_from_same_day_overwrites_are_not_lost(tmp_path):
     assert st.list("raw/names/") == [] and len(st.get_json("out/names.json")) == 3
 
 
-def test_german_scans_already_stored_are_skipped(tmp_path):
+def _raw_scan(st, sid, t, locale, data="2589,1,1,1,1,1"):
+    scan = {"id": sid, "t": t, "cov": 1, "locale": locale, "data": data, "items": 1}
+    st.put(f"raw/scans/{process.day_of(t)}/xx/{sid}.json.gz", gzip.compress(json.dumps(
+        {"received": t, "member": "De", "scan": scan}).encode()))
+
+
+def test_german_scans_count_other_languages_dont(tmp_path):
     st = LocalStore(tmp_path)
     upload(st, "aaaa-1", T0 + 600, goods(1.0))
-    scan = {"id": "dddd-1", "t": T0 + 900, "cov": 1, "locale": "deDE", "data": "2589,1,1,1,1,1", "items": 1}
-    st.put(f"raw/scans/{process.day_of(T0)}/xx/dddd-1.json.gz", gzip.compress(json.dumps(
-        {"received": T0, "member": "De", "scan": scan}).encode()))
+    _raw_scan(st, "dddd-1", T0 + 900, "deDE")
+    _raw_scan(st, "ffff-1", T0 + 1000, "frFR", "4306,1,1,1,1,1")
     process.run(st, now=T0 + 2 * H)
     latest = st.get_json("out/latest.json")
-    assert "2589" not in latest["items"] and latest["scans24h"] == 1
+    assert "2589" in latest["items"] and "4306" not in latest["items"] and latest["scans24h"] == 2
+
+
+def test_german_scans_skipped_before_21_nov_are_taken_once(tmp_path):
+    st = LocalStore(tmp_path)
+    upload(st, "aaaa-1", T0 + 600, goods(1.0))
+    _raw_scan(st, "dddd-1", T0 + 900, "deDE")
+    process.run(st, now=T0 + 2 * H)
+    state = st.get_json("out/_state.json")                    # pretend the old job skipped it
+    state["done"]["dddd-1"].append("skip")
+    del state["locale_v"]
+    st.put_json("out/_state.json", state)
+    st.put_json("out/latest.json", {"items": {}})
+    process.run(st, now=T0 + 3 * H)
+    assert "2589" in st.get_json("out/latest.json")["items"]
+    assert st.get_json("out/_state.json")["done"]["dddd-1"][3:] == []
 
 
 def test_tsm_copies_only_changed_files_and_reports_probes(tmp_path):

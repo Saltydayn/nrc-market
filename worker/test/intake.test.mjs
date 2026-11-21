@@ -157,13 +157,26 @@ test("names upload: one file per upload, so a second upload the same day doesn't
   assert.deepEqual(files, ["raw/names/enUS/Salty_Dayn-2026-11-05-100000.json.gz", "raw/names/enUS/Salty_Dayn-2026-11-05-183005.json.gz"]);
 });
 
-test("German client: names and scans are answered ok but not kept", async () => {
+test("German client: names and scans are kept like English ones", async () => {
   const e = env();
   const r = await worker.fetch(req("/v1/names", { format: "nrc-market-names/1", locale: "deDE",
     names: { 2589: "Leinenstoff|1|7|5|5|0|200" } }), e);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { ok: true, skipped: "locale" });
+  assert.deepEqual(await r.json(), { ok: true });
   const s = scan({ locale: "deDE" });
+  const res = await (await post(e, s)).json();
+  assert.deepEqual(res.scans, [{ id: s.id, stored: true }]);
+  const keys = [...e.BUCKET.m.keys()];
+  assert.ok(keys.some((k) => k.startsWith("raw/names/deDE/")));
+  assert.ok(keys.some((k) => k.startsWith("raw/scans/") && k.endsWith(`${s.id}.json.gz`)));
+});
+
+test("other client languages: answered ok but not kept", async () => {
+  const e = env();
+  const r = await worker.fetch(req("/v1/names", { format: "nrc-market-names/1", locale: "frFR",
+    names: { 2589: "Tissu de lin|1|7|5|5|0|200" } }), e);
+  assert.deepEqual(await r.json(), { ok: true, skipped: "locale" });
+  const s = scan({ locale: "frFR" });
   const res = await (await post(e, s)).json();
   assert.deepEqual(res.scans, [{ id: s.id, dup: true, skipped: "locale" }]);
   assert.ok(![...e.BUCKET.m.keys()].some((k) => k.startsWith("raw/")));

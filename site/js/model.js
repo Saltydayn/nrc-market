@@ -80,6 +80,7 @@ export function buildRows(latest, names) {
       ...best,
       id,
       name: named ? info.en : unknownName(id),
+      de: info?.de || null,        // German client name, searchable too
       named,
       q: info?.q ?? 1,
       cls: info?.cls ?? null,
@@ -141,7 +142,7 @@ export function addTsm(rows, tsm, names) {
     const named = !!(info && info.en);
     only.push({
       id, key: id, suffix: null, tsmOnly: true, tsm: t, sold: t.sold,
-      name: named ? info.en : unknownName(id), named,
+      name: named ? info.en : unknownName(id), named, de: info?.de || null,
       q: info?.q ?? 1, cls: info?.cls ?? null, sub: info?.sub ?? null, ilvl: info?.ilvl ?? null,
       req: info?.req ?? 0, stack: info?.stack ?? null, icon: info?.icon || null,
       sell: Number.isFinite(info?.sell) ? info.sell : null,

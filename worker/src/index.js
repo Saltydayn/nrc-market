@@ -25,7 +25,7 @@ const MAX_JSON = 24 * 1024 * 1024;         // after unpacking
 const MAX_AGE = 30 * 24 * 3600;            // archive uploads after sync v2 arrives may be a few weeks old
 const LINE = /^[0-9]+(:-?[0-9]+)?,\d+,\d+,\d+,\d+,\d+(,(\d+\*\d+)(;\d+\*\d+)*)?$/;
 const SCAN_ID = /^[0-9a-zA-Z]{4,32}-\d{9,11}$/;
-const LOCALE = "enUS";                     // English clients only (Joshua, 4 Nov); others are taken but not kept
+const LOCALES = ["enUS", "deDE"];          // the guild plays on both; prices are keyed by item ID, so both count (21 Nov)
 
 const json = (status, body, extra = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...extra } });
@@ -158,7 +158,7 @@ async function postScans(request, env, now) {
   let writes = 3;
   for (const scan of body.scans) {
     // Other client languages: answered like a duplicate so NRC Sync counts it as sent and moves on.
-    if (scan.locale && scan.locale !== LOCALE) { results.push({ id: scan.id, dup: true, skipped: "locale" }); continue; }
+    if (scan.locale && !LOCALES.includes(scan.locale)) { results.push({ id: scan.id, dup: true, skipped: "locale" }); continue; }
     const path = `raw/scans/${day(scan.t)}/${hour(scan.t).slice(8)}/${scan.id}.json.gz`;
     if (await env.BUCKET.head(path)) { results.push({ id: scan.id, dup: true }); continue; }
     const slotKey = `limits/slot/${hour(scan.t)}.json`;
@@ -208,7 +208,7 @@ async function postNames(request, env, now) {
   if (error) return json(error, { error: "body" });
   if (body.format !== NAMES_FORMAT || !/^[a-z]{2}[A-Z]{2}$/.test(body.locale || "")) return json(400, { error: "format" });
   if (!body.names || typeof body.names !== "object") return json(400, { error: "names" });
-  if (body.locale !== LOCALE) {
+  if (!LOCALES.includes(body.locale)) {
     await count(env, who, now, 3);
     return json(200, { ok: true, skipped: "locale" });
   }

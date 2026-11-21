@@ -25,7 +25,8 @@ KEEP_RAW_DAYS = 30
 SHARDS = 64
 OUTLIER = (0.67, 1.5)          # a scan's typical price vs everyone else's
 FIELDS = ("min", "p10", "med", "units", "listings")
-LOCALE = "enUS"                # English clients only (Joshua, 4 Nov); the intake already drops the rest
+LOCALES = {"enUS": "en", "deDE": "de"}   # client language -> names.json field; prices count from both (21 Nov)
+LOCALE_V = 1                   # bumped when LOCALES grows: scans skipped for their language get another look
 DAILY_V = 2                    # daily rollups got p10 (12 Nov): rebuilt once from the hourly history
 NAMES_V = 2                    # names.json rebuilt from every file once: English only + icons (6 Nov)
 NAME_FILE = re.compile(r"-(\d{4}-\d{2}-\d{2})(-\d{6})?\.json\.gz$")   # old files: no time part
@@ -112,13 +113,18 @@ def load_scan(store, path):
     rec = json.loads(gzip.decompress(store.get(path)))
     s = rec["scan"]
     return {"id": s["id"], "t": s["t"], "cov": float(s.get("cov", 1)), "member": rec.get("member"),
-            "locale": s.get("locale") or LOCALE, "items": parse(s["data"])}
+            "locale": s.get("locale") or "enUS", "items": parse(s["data"])}
 
 
 def run(store, now=None, icon_map=None, icon_cfg=None, lookup=None):
     now = int(now or time.time())
     state = store.get_json("out/_state.json") or {"done": {}, "hours": {}}
     done, hours = state["done"], state["hours"]      # scan id -> [path, hour, member]; hour -> [scan ids]
+
+    if state.get("locale_v") != LOCALE_V:              # German scans were skipped before 21 Nov; take any still stored
+        for sid in [sid for sid, v in done.items() if v[3:] == ["skip"]]:
+            del done[sid]
+        state["locale_v"] = LOCALE_V
 
     touched = set()
     for path in store.list("raw/scans/"):
@@ -127,7 +133,7 @@ def run(store, now=None, icon_map=None, icon_cfg=None, lookup=None):
             continue
         s = load_scan(store, path)
         h = s["t"] // HOUR * HOUR
-        if s["locale"] != LOCALE:                       # stored before the intake filtered them
+        if s["locale"] not in LOCALES:                  # other client languages aren't used
             done[sid] = [path, h, s["member"], "skip"]
             continue
         done[sid] = [path, h, s["member"]]
@@ -295,7 +301,7 @@ def _name_day(path):
 
 
 def merge_names(store, state, now, icon_map, icon_cfg, lookup=None):
-    """English names + item info from raw/names/enUS/, plus icon names (jobs/icons.py) -> out/names.json.
+    """Names + item info from raw/names/<locale>/ (enUS -> "en", deDE -> "de"), plus icon names (jobs/icons.py) -> out/names.json.
     Files uploaded before 6 Nov have one name per member and day and could be overwritten later that day,
     so those are read again while they're from today or yesterday."""
     if state.get("names_v") != NAMES_V:
@@ -305,7 +311,7 @@ def merge_names(store, state, now, icon_map, icon_cfg, lookup=None):
     seen = set(state.get("names", []))
     before = json.dumps(names, sort_keys=True)
     recent = {day_of(now - 86400), day_of(now)}
-    listed = store.list(f"raw/names/{LOCALE}/")
+    listed = [p for loc in LOCALES for p in store.list(f"raw/names/{loc}/")]
     new = []
     for p in listed:
         m = NAME_FILE.search(p)
@@ -322,7 +328,7 @@ def merge_names(store, state, now, icon_map, icon_cfg, lookup=None):
             except ValueError:
                 continue
             e = names.setdefault(str(item_id), {})
-            e["en"] = parts[0]
+            e[LOCALES[p.split("/")[2]]] = parts[0]
             e.update(dict(zip(("q", "cls", "sub", "ilvl", "req", "stack"), nums)))
             if len(parts) > 7 and parts[7].isdigit() and int(parts[7]) > 0:
                 e["iconId"] = int(parts[7])
