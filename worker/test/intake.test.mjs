@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import worker, { checkScan } from "../src/index.js";
+import worker, { checkScan, checkFarm } from "../src/index.js";
 
 class FakeBucket {
   constructor() { this.m = new Map(); this.puts = 0; }
@@ -12,8 +12,12 @@ class FakeBucket {
     const v = this.m.get(k);
     return { json: async () => JSON.parse(typeof v === "string" ? v : Buffer.from(v).toString()) };
   }
-  async head(k) { return this.m.has(k) ? {} : null; }
-  async put(k, v) { this.puts++; this.m.set(k, typeof v === "string" ? v : new Uint8Array(v)); }
+  async head(k) { return this.m.has(k) ? { customMetadata: this.meta?.get(k) } : null; }
+  async put(k, v, opt) {
+    this.puts++;
+    this.m.set(k, typeof v === "string" ? v : new Uint8Array(v));
+    if (opt?.customMetadata) (this.meta ||= new Map()).set(k, opt.customMetadata);
+  }
 }
 
 const KEY = "test-upload-key-0123456789abcdef";
@@ -205,5 +209,88 @@ test("price file for the tooltip: install key only, 304 when unchanged", async (
   assert.equal(r.status, 200);
   assert.match(await r.text(), /2589,28,30,17268,13/);
   r = await get({ authorization: `Bearer ${KEY}`, "if-none-match": '"v1"' });
+  assert.equal(r.status, 304);
+});
+
+// ---- farm tracker ----
+function farmExport(over = {}) {
+  return { format: "nrc-farm/1", rev: 7, t: now() - 120, pid: "a1b2c3d4e5f6", ver: "0.14.0", locale: "deDE",
+    guild: "Naga Rave Cave", main: "Saltydayn Nagaqt", chars: { "Saltydayn Nagaqt": "ROGUE,60" },
+    mobs: "2589|Defias Thug|12|normal||40|900|39|38|5400|0|2589:12:10|", nodes: "", runs: "", farms: "",
+    days: { "2026-11-25": { "Saltydayn Nagaqt": "3600,100000,40000,20000,120,0,0,0,0,100000,0,90000" } }, ...over };
+}
+const postFarm = (e, x, opt) => worker.fetch(req("/v1/farm", { format: "nrc-farm-upload/1", app: "nrc-sync 1.3.0", export: x }, opt), e);
+
+test("farm export is stored per PlayerID with the member name", async () => {
+  const e = env();
+  const r = await postFarm(e, farmExport());
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, stored: true });
+  const rec = JSON.parse(e.BUCKET.m.get("farm/in/a1b2c3d4e5f6.json"));
+  assert.equal(rec.member, "Salty Dayn");
+  assert.equal(rec.export.rev, 7);
+  assert.equal(rec.export.chars["Saltydayn Nagaqt"], "ROGUE,60");
+});
+
+test("farm: one accepted upload per key per 30 min", async () => {
+  const e = env();
+  assert.equal((await postFarm(e, farmExport())).status, 200);
+  const r = await postFarm(e, farmExport({ rev: 8, t: now() - 10 }));
+  assert.equal(r.status, 429);
+  assert.ok(Number(r.headers.get("retry-after")) > 0);
+});
+
+test("farm: an older export never replaces a newer stored one", async () => {
+  const e = env();
+  assert.equal((await postFarm(e, farmExport({ t: now() - 60 }))).status, 200);
+  e.BUCKET.m.delete([...e.BUCKET.m.keys()].find((k) => k.startsWith("limits/farm/")));
+  const r = await postFarm(e, farmExport({ rev: 3, t: now() - 9000 }));
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, kept: "newer" });
+  assert.equal(JSON.parse(e.BUCKET.m.get("farm/in/a1b2c3d4e5f6.json")).export.rev, 7);
+});
+
+test("farm: wrong format, bad pid, too big or no key are refused", async () => {
+  assert.equal((await postFarm(env(), farmExport(), { key: "nope-nope-nope-nope-nope-nope" })).status, 401);
+  for (const bad of [{ format: "nrc-farm/2" }, { pid: "XYZ" }, { pid: "a1b2c3d4e5f" }, { pid: "A1B2C3D4E5F6" },
+    { t: now() + 3600 }, { mobs: 5 }, { days: [] }, { rev: "7" }]) {
+    assert.equal((await postFarm(env(), farmExport(bad))).status, 400, JSON.stringify(bad));
+  }
+  const e = env();
+  const r = await worker.fetch(req("/v1/farm", { format: "something", export: farmExport() }), e);
+  assert.equal(r.status, 400);
+  const big = farmExport({ mobs: "x".repeat(1100 * 1024) });
+  assert.equal((await postFarm(env(), big)).status, 413);
+  assert.equal(checkFarm(farmExport(), now()), null);
+});
+
+test("farm: other guilds refused when a guild filter is set", async () => {
+  const e = env();
+  e.ALLOWED_GUILDS = "Naga Rave Cave";
+  assert.equal((await postFarm(e, farmExport({ guild: "Somebody Else" }))).status, 403);
+  assert.equal((await postFarm(e, farmExport())).status, 200);
+});
+
+test("guild farm file: install key only, 404 before the first build, 304 when unchanged", async () => {
+  const e = env();
+  const get = (headers) => worker.fetch(new Request("https://x/v1/farm", { headers }), e);
+  assert.equal((await get({})).status, 401);
+  e.BUCKET.get = async (k, opt) => {
+    if (k.startsWith("keys/")) return FakeBucket.prototype.get.call(e.BUCKET, k);
+    return null;
+  };
+  assert.equal((await get({ authorization: `Bearer ${KEY}` })).status, 404);
+  e.BUCKET.get = async (k, opt) => {
+    if (k.startsWith("keys/")) return FakeBucket.prototype.get.call(e.BUCKET, k);
+    if (k !== "farm/guild.txt") return null;
+    const etag = '"f1"';
+    if (opt && opt.onlyIf && opt.onlyIf.get && opt.onlyIf.get("if-none-match") === etag) return { httpEtag: etag };
+    return { httpEtag: etag, body: "nrc-farm-guild/1|1795600000|1\nC|Saltydayn Nagaqt|a1b2c3d4e5f6||ROGUE|60\n" };
+  };
+  let r = await get({ authorization: `Bearer ${KEY}` });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.match(await r.text(), /^nrc-farm-guild\/1\|/);
+  r = await get({ authorization: `Bearer ${KEY}`, "if-none-match": '"f1"' });
   assert.equal(r.status, 304);
 });

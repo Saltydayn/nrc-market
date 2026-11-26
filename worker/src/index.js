@@ -5,6 +5,8 @@
 //   POST /v1/scans     up to 4 scans in one request (NRC Sync sends once an hour), Authorization: Bearer <key>
 //   POST /v1/names     item names for one client language
 //   GET  /v1/prices    in-game price file for GuildKit's tooltip (install key), see out/ingame.txt
+//   POST /v1/farm      one account's farm tracker export (GuildKit_Farm), newest per PlayerID wins
+//   GET  /v1/farm      the merged guild farm file (install key), see jobs/farm.py
 //   GET  /v1/health    quick check
 //
 // R2 layout:
@@ -16,6 +18,8 @@
 //   limits/key/<hash>/<YYYYMMDDHH>.json  requests by one key this hour  -> per-key limit
 //   limits/slot/<YYYYMMDDHH>.json        scans stored for that scan hour -> enough is enough
 //   limits/ip/<hash>/<YYYY-MM-DD>.json   keys handed out to one address today
+//   farm/in/<pid>.json                   { received, member, app, export }  (latest export of one WoW account folder)
+//   limits/farm/<hash>.json              { t } last accepted farm upload of one key -> one per 30 min
 
 const SCANS_FORMAT = "nrc-market-scans/1";
 const MAX_SCANS = 4;
@@ -25,7 +29,12 @@ const MAX_JSON = 24 * 1024 * 1024;         // after unpacking
 const MAX_AGE = 30 * 24 * 3600;            // archive uploads after sync v2 arrives may be a few weeks old
 const LINE = /^[0-9]+(:-?[0-9]+)?,\d+,\d+,\d+,\d+,\d+(,(\d+\*\d+)(;\d+\*\d+)*)?$/;
 const SCAN_ID = /^[0-9a-zA-Z]{4,32}-\d{9,11}$/;
-const LOCALES = ["enUS", "deDE"];          // the guild plays on both; prices are keyed by item ID, so both count (21 Nov)
+const LOCALES = ["enUS", "deDE"];
+const FARM_FORMAT = "nrc-farm-upload/1";
+const FARM_EXPORT = "nrc-farm/1";
+const FARM_MAX = 1024 * 1024;              // unpacked; an account with 1,600 mobs is ~180 KB
+const FARM_EVERY = 30 * 60;                // one accepted farm upload per key per 30 min
+const PID = /^[0-9a-f]{12}$/;          // the guild plays on both; prices are keyed by item ID, so both count (21 Nov)
 
 const json = (status, body, extra = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...extra } });
@@ -54,9 +63,9 @@ async function gzip(text) {
   return new Response(stream).arrayBuffer();
 }
 
-async function readBody(request) {
+async function readBody(request, max = MAX_JSON) {
   const size = Number(request.headers.get("content-length") || 0);
-  if (size > MAX_BODY) return { error: 413 };
+  if (size > Math.min(MAX_BODY, max)) return { error: 413 };
   let stream = request.body;
   if (!stream) return { error: 400 };
   if ((request.headers.get("content-encoding") || "").includes("gzip")) {
@@ -64,7 +73,7 @@ async function readBody(request) {
   }
   const text = await new Response(stream).text().catch(() => null);
   if (text === null) return { error: 400 };
-  if (text.length > MAX_JSON) return { error: 413 };
+  if (text.length > max) return { error: 413 };
   try {
     return { body: JSON.parse(text) };
   } catch {
@@ -231,6 +240,69 @@ async function getPrices(request, env) {
   return new Response(obj.body, { headers });
 }
 
+// Checks one farm export (shape only; the hourly job checks every line). Returns null when fine, else a reason.
+export function checkFarm(x, now) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return "no export";
+  if (x.format !== FARM_EXPORT) return "export format";
+  if (typeof x.pid !== "string" || !PID.test(x.pid)) return "bad pid";
+  if (!Number.isInteger(x.t) || x.t <= 0 || x.t > now + 600) return "bad time";
+  if (!Number.isInteger(x.rev) || x.rev < 0) return "bad rev";
+  for (const f of ["mobs", "nodes", "runs", "farms", "guild", "main", "locale", "ver"]) {
+    if (x[f] !== undefined && typeof x[f] !== "string") return `bad ${f}`;
+  }
+  for (const f of ["chars", "days"]) {
+    if (x[f] !== undefined && (typeof x[f] !== "object" || x[f] === null || Array.isArray(x[f]))) return `bad ${f}`;
+  }
+  return null;
+}
+
+async function postFarm(request, env, now) {
+  const c = cfg(env);
+  const who = await member(env, request);
+  if (!who) return json(401, { error: "key" });
+  const limitKey = `limits/farm/${who.hash}.json`;
+  const last = (await getJson(env, limitKey))?.t || 0;
+  if (now - last < FARM_EVERY) return json(429, { error: "slow down" }, { "retry-after": String(FARM_EVERY - (now - last)) });
+  const today = (await getJson(env, `limits/${day(now)}.json`))?.n || 0;
+  if (today >= c.dailyCap) return json(503, { error: "daily cap" }, { "retry-after": "21600" });
+  const month = (await getJson(env, `limits/${day(now).slice(0, 7)}.json`))?.n || 0;
+  if (month + 4 >= c.monthlyWrites) return json(503, { error: "monthly cap" }, { "retry-after": "86400" });
+  const { body, error } = await readBody(request, FARM_MAX);
+  if (error) return json(error, { error: "body" });
+  if (body.format !== FARM_FORMAT) return json(400, { error: "format" });
+  const x = body.export;
+  const bad = checkFarm(x, now);
+  if (bad) return json(400, { error: bad });
+  if (c.guilds && c.guilds.length && !c.guilds.includes(x.guild)) return json(403, { error: "guild" });
+
+  // an older export than the stored one (a stale copy sent late): answer OK so the app moves on, keep ours
+  const path = `farm/in/${x.pid}.json`;
+  const stored = await env.BUCKET.head(path);
+  const storedT = Number(stored?.customMetadata?.t || 0);
+  if (storedT > x.t) return json(200, { ok: true, kept: "newer" });
+
+  const record = { received: now, member: who.name, app: String(body.app || "").slice(0, 40), export: x };
+  await env.BUCKET.put(path, JSON.stringify(record), {
+    httpMetadata: { contentType: "application/json" },
+    customMetadata: { t: String(x.t), rev: String(x.rev) },
+  });
+  await env.BUCKET.put(limitKey, JSON.stringify({ t: now }));
+  await bump(env, `limits/${day(now)}.json`);
+  await bump(env, `limits/${day(now).slice(0, 7)}.json`, 4);
+  return json(200, { ok: true, stored: true });
+}
+
+// Guild farm file (farm/guild.txt, written by the hourly job). Same install key, read-only, ETag / 304 like the prices.
+async function getFarm(request, env) {
+  const who = await member(env, request);
+  if (!who) return json(401, { error: "key" });
+  const obj = await env.BUCKET.get("farm/guild.txt", { onlyIf: request.headers });
+  if (!obj) return json(404, { error: "no farm data yet" });
+  const headers = { "content-type": "text/plain; charset=utf-8", etag: obj.httpEtag, "cache-control": "private, max-age=600" };
+  if (!("body" in obj) || !obj.body) return new Response(null, { status: 304, headers });
+  return new Response(obj.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -240,6 +312,8 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/register") return await postRegister(request, env, now);
       if (request.method === "POST" && url.pathname === "/v1/names") return await postNames(request, env, now);
       if (request.method === "GET" && url.pathname === "/v1/prices") return await getPrices(request, env);
+      if (request.method === "POST" && url.pathname === "/v1/farm") return await postFarm(request, env, now);
+      if (request.method === "GET" && url.pathname === "/v1/farm") return await getFarm(request, env);
       if (request.method === "GET" && url.pathname === "/v1/health") {
         const today = (await getJson(env, `limits/${day(now)}.json`))?.n || 0;
         return json(200, { ok: true, uploadsToday: today });

@@ -1,4 +1,4 @@
-"""Hourly job (GitHub Actions): copy TSM files, then process new scans.
+"""Hourly job (GitHub Actions): copy TSM files, process new scans, then build the guild farm file.
 
     python jobs/run.py                 uses R2 (env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)
     python jobs/run.py --local DIR     works on a local folder instead (testing)
@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import farm  # noqa: E402
 import icons  # noqa: E402
 import process  # noqa: E402
 import tsm  # noqa: E402
@@ -34,6 +35,11 @@ def main():
         print("process:", process.run(store, icon_map=icons.load_list(), icon_cfg=icfg, lookup=lookup))
     except WriteCapReached as e:
         print("stopped:", e)
+        sys.exit(1)
+    try:                                   # its own step: a farm problem never holds up the prices
+        print("farm:", farm.run(store))
+    except WriteCapReached as e:
+        print("farm stopped:", e)
         sys.exit(1)
 
 

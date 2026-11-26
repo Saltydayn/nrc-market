@@ -70,6 +70,9 @@ test("hourly job only starts when a scan arrived since the last run, or every ~3
   // a late upload of yesterday's scan counts too
   assert.equal(await jobNeeded(bucket(now - H, [{ key: "raw/scans/2026-11-19/22/b.json.gz", at: now - 5 * 60000 }]), now), true);
   assert.equal(await jobNeeded(bucket(now - 3 * H, []), now), true);   // TSM, names: at least every ~3 h
+  // a new farm tracker upload starts the job too (guild farm file), an old one doesn't
+  assert.equal(await jobNeeded(bucket(now - H, [{ key: "farm/in/a1b2c3d4e5f6.json", at: now - 5 * 60000 }]), now), true);
+  assert.equal(await jobNeeded(bucket(now - H, [{ key: "farm/in/a1b2c3d4e5f6.json", at: now - 2 * H }]), now), false);
   assert.equal(await jobNeeded(bucket(null, []), now), true);
   assert.equal(await jobNeeded({ head: async () => { throw new Error("down"); } }, now), true);
 });

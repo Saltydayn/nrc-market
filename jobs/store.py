@@ -56,6 +56,10 @@ class LocalStore(Store):
                     out.append(k)
         return sorted(out)
 
+    def list_meta(self, prefix):
+        """[(key, last modified as unix seconds)]"""
+        return [(k, (self.root / k).stat().st_mtime) for k in self.list(prefix)]
+
     def get(self, key):
         p = self.root / key
         return p.read_bytes() if p.exists() else None
@@ -88,13 +92,17 @@ class R2Store(Store):
         )
 
     def list(self, prefix):
+        return [k for k, _ in self.list_meta(prefix)]
+
+    def list_meta(self, prefix):
+        """[(key, last modified as unix seconds)]"""
         out, token = [], None
         while True:
             kw = {"Bucket": self.bucket, "Prefix": prefix}
             if token:
                 kw["ContinuationToken"] = token
             r = self.s3.list_objects_v2(**kw)
-            out += [o["Key"] for o in r.get("Contents", [])]
+            out += [(o["Key"], o["LastModified"].timestamp()) for o in r.get("Contents", [])]
             if not r.get("IsTruncated"):
                 return sorted(out)
             token = r["NextContinuationToken"]

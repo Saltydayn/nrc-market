@@ -43,7 +43,8 @@ export default {
 // Each run costs GitHub minutes (free: 2,000 a month, shared with the other private repos), and
 // about 4 in 10 hourly runs found nothing new. So the job only starts when a scan arrived since the
 // last run, or when the last run is ~3 hours old (TSM files, names and late uploads still get picked up).
-// Costs 1 read + up to 3 bucket listings per hour.
+// A new farm tracker upload (farm/in/) counts too, so the guild farm file stays hourly.
+// Costs 1 read + up to 4 bucket listings per hour.
 const FORCE_AFTER_MS = (3 * 60 - 15) * 60 * 1000;
 export async function jobNeeded(bucket, nowMs = Date.now()) {
   if (!bucket) return true;
@@ -61,6 +62,8 @@ export async function jobNeeded(bucket, nowMs = Date.now()) {
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
     }
+    const farm = await bucket.list({ prefix: "farm/in/", limit: 1000 });     // one file per account, ~100
+    if (farm.objects.some((o) => new Date(o.uploaded).getTime() > last)) return true;
     return false;
   } catch (e) {
     console.log("hourly job: check failed, starting anyway", String(e));
